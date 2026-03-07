@@ -36,7 +36,7 @@
 
 ```bash
 # 克隆项目
-git clone <repository-url>
+git clone https://github.com/f1yby/my-speak.git
 cd my-speak
 
 # 启动所有服务
