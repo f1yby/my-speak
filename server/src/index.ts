@@ -5,6 +5,7 @@ import morgan from 'morgan';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
+import authRoutes from './api/routes/auth.routes';
 
 dotenv.config();
 
@@ -38,6 +39,9 @@ app.get('/health', (req, res) => {
 app.get('/api', (req, res) => {
   res.json({ message: 'My-Speak API Server', version: '1.0.0' });
 });
+
+// Auth routes
+app.use('/api/auth', authRoutes);
 
 // Socket.io connection
 io.on('connection', (socket) => {

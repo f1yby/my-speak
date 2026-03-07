@@ -1,25 +1,44 @@
-import { useState } from 'react'
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { LoginForm } from './components/auth/LoginForm';
+import { RegisterForm } from './components/auth/RegisterForm';
+import { ProtectedRoute, PublicRoute } from './components/auth/AuthGuard';
+import { MainLayout } from './components/layout/MainLayout';
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4">My-Speak</h1>
-        <p className="text-gray-400 mb-6">语音交流软件</p>
-        <button
-          onClick={() => setCount((count) => count + 1)}
-          className="btn-primary"
-        >
-          count is {count}
-        </button>
-        <p className="mt-4 text-sm text-gray-500">
-          React + TypeScript + Vite + Tailwind CSS
-        </p>
-      </div>
-    </div>
-  )
+    <Router>
+      <Routes>
+        <Route
+          path="/login"
+          element={
+            <PublicRoute>
+              <LoginForm />
+            </PublicRoute>
+          }
+        />
+        <Route
+          path="/register"
+          element={
+            <PublicRoute>
+              <RegisterForm />
+            </PublicRoute>
+          }
+        />
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <MainLayout />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="*"
+          element={<div className="text-white p-8">404 - 页面不存在</div>}
+        />
+      </Routes>
+    </Router>
+  );
 }
 
-export default App
+export default App;
