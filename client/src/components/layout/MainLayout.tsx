@@ -28,7 +28,7 @@ export const MainLayout: React.FC = () => {
     
     const token = localStorage.getItem('token');
     if (token) {
-      const socketUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+      const socketUrl = import.meta.env.VITE_SOCKET_URL || window.location.origin;
       const newSocket = io(socketUrl, {
         auth: { token },
       });
