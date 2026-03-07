@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Mic, MicOff, Volume2, VolumeX, Phone, PhoneOff, Users } from 'lucide-react';
+import { Mic, MicOff, Volume2, VolumeX, Phone, PhoneOff, Users, Waves } from 'lucide-react';
 import { voiceService, type VoiceParticipant } from '../../services/voice-service';
 
 interface VoiceChannelProps {
@@ -19,6 +19,7 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
   const [isConnecting, setIsConnecting] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isDeafened, setIsDeafened] = useState(false);
+  const [noiseSuppressionEnabled, setNoiseSuppressionEnabled] = useState(true);
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,6 +87,11 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
     setIsDeafened(deafened);
   };
 
+  const handleToggleNoiseSuppression = () => {
+    const enabled = voiceService.toggleNoiseSuppression();
+    setNoiseSuppressionEnabled(enabled);
+  };
+
   if (!isConnected) {
     return (
       <div className="p-4 border-t border-gray-700">
@@ -129,6 +135,7 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
           <span className="text-gray-300">You</span>
           {isMuted && <MicOff className="w-3 h-3 text-red-400" />}
           {isDeafened && <VolumeX className="w-3 h-3 text-red-400" />}
+          {noiseSuppressionEnabled && <Waves className="w-3 h-3 text-blue-400" title="Noise suppression" />}
         </div>
         
         {participants.map((participant) => (
@@ -164,6 +171,16 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
           >
             {isDeafened ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
+
+          <button
+            onClick={handleToggleNoiseSuppression}
+            className={`p-2 rounded transition-colors ${
+              noiseSuppressionEnabled ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600'
+            }`}
+            title={noiseSuppressionEnabled ? 'Disable noise suppression' : 'Enable noise suppression'}
+          >
+            <Waves className="w-4 h-4" />
+          </button>
         </div>
 
         <button
@@ -173,6 +190,10 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
         >
           <PhoneOff className="w-4 h-4" />
         </button>
+      </div>
+
+      <div className="mt-2 text-xs text-gray-500">
+        {noiseSuppressionEnabled ? '🌊 Noise suppression active' : 'Noise suppression off'}
       </div>
     </div>
   );

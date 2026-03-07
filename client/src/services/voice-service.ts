@@ -1,4 +1,5 @@
 import { Socket } from 'socket.io-client';
+import { noiseSuppressionService } from './noise-suppression';
 
 export interface VoiceParticipant {
   socketId: string;
@@ -10,12 +11,14 @@ export interface VoiceParticipant {
 export class VoiceService {
   private socket: Socket | null = null;
   private localStream: MediaStream | null = null;
+  private processedStream: MediaStream | null = null;
   private peerConnections: Map<string, RTCPeerConnection> = new Map();
   private remoteStreams: Map<string, MediaStream> = new Map();
   private audioElements: Map<string, HTMLAudioElement> = new Map();
   private channelId: string = '';
   private isMuted: boolean = false;
   private isDeafened: boolean = false;
+  private noiseSuppressionEnabled: boolean = true;
   
   private readonly ICE_SERVERS = [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -93,12 +96,24 @@ export class VoiceService {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
+          sampleRate: 48000,
         },
         video: false,
       });
 
+      if (this.noiseSuppressionEnabled) {
+        try {
+          this.processedStream = await noiseSuppressionService.processStream(this.localStream);
+        } catch (error) {
+          console.warn('Failed to apply noise suppression, using original stream:', error);
+          this.processedStream = this.localStream;
+        }
+      } else {
+        this.processedStream = this.localStream;
+      }
+
       if (this.isMuted) {
-        this.localStream.getAudioTracks().forEach((track) => {
+        this.processedStream.getAudioTracks().forEach((track) => {
           track.enabled = false;
         });
       }
@@ -120,9 +135,10 @@ export class VoiceService {
     const pc = new RTCPeerConnection({ iceServers: this.ICE_SERVERS });
     this.peerConnections.set(socketId, pc);
 
-    if (this.localStream) {
-      this.localStream.getTracks().forEach((track) => {
-        pc.addTrack(track, this.localStream!);
+    const streamToSend = this.processedStream || this.localStream;
+    if (streamToSend) {
+      streamToSend.getTracks().forEach((track) => {
+        pc.addTrack(track, streamToSend!);
       });
     }
 
@@ -231,8 +247,9 @@ export class VoiceService {
   toggleMute(): boolean {
     this.isMuted = !this.isMuted;
     
-    if (this.localStream) {
-      this.localStream.getAudioTracks().forEach((track) => {
+    const streamToMute = this.processedStream || this.localStream;
+    if (streamToMute) {
+      streamToMute.getAudioTracks().forEach((track) => {
         track.enabled = !this.isMuted;
       });
     }
@@ -252,6 +269,12 @@ export class VoiceService {
     return this.isDeafened;
   }
 
+  toggleNoiseSuppression(): boolean {
+    this.noiseSuppressionEnabled = !this.noiseSuppressionEnabled;
+    noiseSuppressionService.setEnabled(this.noiseSuppressionEnabled);
+    return this.noiseSuppressionEnabled;
+  }
+
   getIsMuted(): boolean {
     return this.isMuted;
   }
@@ -260,11 +283,18 @@ export class VoiceService {
     return this.isDeafened;
   }
 
+  getNoiseSuppressionEnabled(): boolean {
+    return this.noiseSuppressionEnabled;
+  }
+
   leaveChannel(): void {
     if (this.localStream) {
       this.localStream.getTracks().forEach((track) => track.stop());
       this.localStream = null;
     }
+    
+    noiseSuppressionService.destroy();
+    this.processedStream = null;
 
     this.peerConnections.forEach((pc) => pc.close());
     this.peerConnections.clear();
