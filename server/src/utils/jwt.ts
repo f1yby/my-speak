@@ -8,7 +8,7 @@ const JWT_REFRESH_EXPIRATION = process.env.JWT_REFRESH_EXPIRATION || '7d';
 export interface TokenPayload {
   userId: string;
   username: string;
-  email: string;
+  email?: string;
   type: 'access' | 'refresh';
   jti: string;
 }

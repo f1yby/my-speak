@@ -1,30 +1,8 @@
 import prisma from '../db/prisma-client';
 import { hashPassword, comparePassword } from '../utils/password';
-import { generateTokens, Tokens } from '../utils/jwt';
+import { v4 as uuidv4 } from 'uuid';
 
-export interface RegisterInput {
-  username: string;
-  email: string;
-  password: string;
-  displayName?: string;
-}
-
-export interface LoginInput {
-  email: string;
-  password: string;
-}
-
-export interface AuthResult {
-  user: {
-    id: string;
-    username: string;
-    email: string;
-    displayName: string | null;
-    avatarUrl: string | null;
-    createdAt: Date;
-  };
-  tokens: Tokens;
-}
+const SESSION_DURATION_HOURS = 24;
 
 export class AuthError extends Error {
   constructor(message: string, public code: string) {
@@ -33,141 +11,89 @@ export class AuthError extends Error {
   }
 }
 
-/**
- * 用户注册
- */
-export async function registerUser(input: RegisterInput): Promise<AuthResult> {
-  const { username, email, password, displayName } = input;
-
-  // 检查用户名是否已存在
-  const existingUsername = await prisma.user.findUnique({
-    where: { username },
+export async function isServerSetup(): Promise<boolean> {
+  const config = await prisma.serverConfig.findUnique({
+    where: { id: 'default' },
   });
-  if (existingUsername) {
-    throw new AuthError('用户名已被使用', 'USERNAME_EXISTS');
-  }
+  return !config;
+}
 
-  // 检查邮箱是否已存在
-  const existingEmail = await prisma.user.findUnique({
-    where: { email },
+export async function setupServer(password: string): Promise<void> {
+  const existing = await prisma.serverConfig.findUnique({
+    where: { id: 'default' },
   });
-  if (existingEmail) {
-    throw new AuthError('邮箱已被注册', 'EMAIL_EXISTS');
+  
+  if (existing) {
+    throw new AuthError('Server already set up', 'ALREADY_SETUP');
   }
-
-  // 加密密码
+  
   const passwordHash = await hashPassword(password);
-
-  // 创建用户
-  const user = await prisma.user.create({
+  
+  await prisma.serverConfig.create({
     data: {
-      username,
-      email,
+      id: 'default',
       passwordHash,
-      displayName: displayName || username,
-    },
-    select: {
-      id: true,
-      username: true,
-      email: true,
-      displayName: true,
-      avatarUrl: true,
-      createdAt: true,
     },
   });
-
-  // 生成Token
-  const tokens = generateTokens({
-    userId: user.id,
-    username: user.username,
-    email: user.email,
-  });
-
-  return {
-    user,
-    tokens,
-  };
 }
 
-/**
- * 用户登录
- */
-export async function loginUser(input: LoginInput): Promise<AuthResult> {
-  const { email, password } = input;
-
-  // 查找用户
-  const user = await prisma.user.findUnique({
-    where: { email },
+export async function login(password: string, username: string): Promise<{ token: string; username: string; expiresAt: Date }> {
+  const config = await prisma.serverConfig.findUnique({
+    where: { id: 'default' },
   });
-
-  if (!user) {
-    throw new AuthError('邮箱或密码错误', 'INVALID_CREDENTIALS');
+  
+  if (!config) {
+    throw new AuthError('Server not set up', 'NOT_SETUP');
   }
-
-  if (!user.isActive) {
-    throw new AuthError('账号已被禁用', 'ACCOUNT_DISABLED');
+  
+  const isValid = await comparePassword(password, config.passwordHash);
+  if (!isValid) {
+    throw new AuthError('Invalid password', 'INVALID_PASSWORD');
   }
-
-  // 验证密码
-  const isPasswordValid = await comparePassword(password, user.passwordHash);
-  if (!isPasswordValid) {
-    throw new AuthError('邮箱或密码错误', 'INVALID_CREDENTIALS');
-  }
-
-  // 更新最后登录时间
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { lastLoginAt: new Date() },
-  });
-
-  // 生成Token
-  const tokens = generateTokens({
-    userId: user.id,
-    username: user.username,
-    email: user.email,
-  });
-
-  return {
-    user: {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      displayName: user.displayName,
-      avatarUrl: user.avatarUrl,
-      createdAt: user.createdAt,
-    },
-    tokens,
-  };
-}
-
-/**
- * 获取当前用户信息
- */
-export async function getCurrentUser(userId: string) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      username: true,
-      email: true,
-      displayName: true,
-      avatarUrl: true,
-      createdAt: true,
+  
+  const token = uuidv4();
+  const expiresAt = new Date(Date.now() + SESSION_DURATION_HOURS * 60 * 60 * 1000);
+  
+  await prisma.session.create({
+    data: {
+      token,
+      username,
+      expiresAt,
     },
   });
-
-  if (!user) {
-    throw new AuthError('用户不存在', 'USER_NOT_FOUND');
-  }
-
-  return user;
+  
+  return { token, username, expiresAt };
 }
 
-/**
- * 用户登出（可选：将Token加入黑名单）
- */
-export async function logoutUser(userId: string): Promise<void> {
-  // 这里可以实现Token黑名单逻辑
-  // 暂时直接返回
-  console.log(`User ${userId} logged out`);
+export async function validateSession(token: string): Promise<{ username: string } | null> {
+  const session = await prisma.session.findUnique({
+    where: { token },
+  });
+  
+  if (!session) {
+    return null;
+  }
+  
+  if (session.expiresAt < new Date()) {
+    await prisma.session.delete({ where: { token } });
+    return null;
+  }
+  
+  return { username: session.username };
+}
+
+export async function logout(token: string): Promise<void> {
+  await prisma.session.deleteMany({
+    where: { token },
+  });
+}
+
+export async function cleanupExpiredSessions(): Promise<void> {
+  await prisma.session.deleteMany({
+    where: {
+      expiresAt: {
+        lt: new Date(),
+      },
+    },
+  });
 }

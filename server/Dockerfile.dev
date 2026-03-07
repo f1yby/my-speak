@@ -2,8 +2,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# 安装系统依赖
-RUN apk add --no-cache openssl
+# 安装系统依赖（mediasoup 编译需要 python、make、g++、invoke、linux-headers）
+RUN apk add --no-cache openssl python3 make g++ py3-pip py3-invoke linux-headers
 
 # 复制 package.json
 COPY package*.json ./

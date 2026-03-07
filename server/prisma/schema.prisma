@@ -7,117 +7,46 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// 用户模型
-model User {
-  id            String    @id @default(uuid()) @db.Uuid
-  username      String    @unique @db.VarChar(32)
-  email         String    @unique @db.VarChar(255)
-  passwordHash  String    @map("password_hash") @db.VarChar(255)
-  displayName   String?   @map("display_name") @db.VarChar(64)
-  avatarUrl     String?   @map("avatar_url") @db.VarChar(500)
-  isActive      Boolean   @default(true) @map("is_active")
-  lastLoginAt   DateTime? @map("last_login_at")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+model ServerConfig {
+  id           String   @id @default("default")
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
-  // Relations
-  ownedServers   Server[]
-  memberships    ServerMember[]
-  messages       Message[]
-  createdInvites Invite[]
-
-  @@map("users")
+  @@map("server_config")
 }
 
-// 服务器模型
-model Server {
-  id          String    @id @default(uuid()) @db.Uuid
-  name        String    @db.VarChar(100)
-  description String?   @db.Text
-  ownerId     String    @map("owner_id") @db.Uuid
-  iconUrl     String?   @map("icon_url") @db.VarChar(500)
-  isActive    Boolean   @default(true) @map("is_active")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  token     String   @unique @db.VarChar(255)
+  username  String   @db.VarChar(64)
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
-  // Relations
-  owner      User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  members    ServerMember[]
-  channels   Channel[]
-  invites    Invite[]
-
-  @@map("servers")
+  @@index([token])
+  @@map("sessions")
 }
 
-// 服务器成员模型
-model ServerMember {
-  id       String   @id @default(uuid()) @db.Uuid
-  serverId String   @map("server_id") @db.Uuid
-  userId   String   @map("user_id") @db.Uuid
-  role     String   @default("member") @db.VarChar(20)
-  joinedAt DateTime @default(now()) @map("joined_at")
-
-  // Relations
-  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([serverId, userId])
-  @@map("server_members")
-}
-
-// 频道模型
 model Channel {
-  id         String   @id @default(uuid()) @db.Uuid
-  serverId   String   @map("server_id") @db.Uuid
-  name       String   @db.VarChar(100)
-  type       String   @default("text") @db.VarChar(20)
-  position   Int      @default(0)
-  bitrate    Int?     // Voice channel only
-  userLimit  Int?     @map("user_limit") // Voice channel only
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  server   Server    @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  messages Message[]
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique @db.VarChar(100)
+  type      String   @default("TEXT") @db.VarChar(20)
+  messages  Message[]
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("channels")
 }
 
-// 消息模型
 model Message {
-  id        String    @id @default(uuid()) @db.Uuid
-  channelId String    @map("channel_id") @db.Uuid
-  authorId  String?   @map("author_id") @db.Uuid
-  content   String    @db.Text
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
+  id         String   @id @default(uuid()) @db.Uuid
+  channelId  String   @map("channel_id") @db.Uuid
+  authorName String   @map("author_name") @db.VarChar(64)
+  content    String   @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
 
-  // Relations
-  channel Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  author  User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
 
   @@index([channelId, createdAt])
   @@map("messages")
-}
-
-// 邀请码模型
-model Invite {
-  id         String    @id @default(uuid()) @db.Uuid
-  serverId   String    @map("server_id") @db.Uuid
-  code       String    @unique @db.VarChar(20)
-  createdBy  String    @map("created_by") @db.Uuid
-  maxUses    Int       @default(1) @map("max_uses")
-  usedCount  Int       @default(0) @map("used_count")
-  expiresAt  DateTime? @map("expires_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  revokedAt  DateTime? @map("revoked_at")
-
-  // Relations
-  server  Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  creator User   @relation(fields: [createdBy], references: [id], onDelete: Cascade)
-
-  @@index([code])
-  @@index([serverId])
-  @@map("invites")
 }

@@ -1,77 +1,71 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { authApi, type User, type LoginInput, type RegisterInput } from '../services/auth-api';
+import { authApi, type User, type LoginInput, type SetupInput } from '../services/auth-api';
 
 interface AuthState {
   user: User | null;
   token: string | null;
   isAuthenticated: boolean;
+  isSetup: boolean | null;
   isLoading: boolean;
   error: string | null;
   
-  // Actions
+  checkSetup: () => Promise<void>;
+  setup: (input: SetupInput) => Promise<void>;
   login: (input: LoginInput) => Promise<void>;
-  register: (input: RegisterInput) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
-  setUser: (user: User) => void;
 }
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       user: null,
       token: null,
       isAuthenticated: false,
+      isSetup: null,
       isLoading: false,
       error: null,
 
-      login: async (input) => {
+      checkSetup: async () => {
+        try {
+          const result = await authApi.checkSetup();
+          set({ isSetup: result.isSetup });
+        } catch (error) {
+          console.error('Check setup error:', error);
+          set({ isSetup: false });
+        }
+      },
+
+      setup: async (input) => {
         set({ isLoading: true, error: null });
         try {
-          const response = await authApi.login(input);
-          const { user, tokens } = response.data;
-          
-          // 保存Token到localStorage
-          localStorage.setItem('accessToken', tokens.accessToken);
-          localStorage.setItem('refreshToken', tokens.refreshToken);
-          
-          set({
-            user,
-            token: tokens.accessToken,
-            isAuthenticated: true,
-            isLoading: false,
-          });
+          await authApi.setup(input);
+          set({ isSetup: true, isLoading: false });
         } catch (error: any) {
-          set({
-            error: error.response?.data?.error?.message || '登录失败',
-            isLoading: false,
-          });
+          const errorMessage = error.response?.data?.error?.message || 'Setup failed';
+          set({ error: errorMessage, isLoading: false });
           throw error;
         }
       },
 
-      register: async (input) => {
+      login: async (input) => {
         set({ isLoading: true, error: null });
         try {
-          const response = await authApi.register(input);
-          const { user, tokens } = response.data;
+          const session = await authApi.login(input);
           
-          // 保存Token到localStorage
-          localStorage.setItem('accessToken', tokens.accessToken);
-          localStorage.setItem('refreshToken', tokens.refreshToken);
+          localStorage.setItem('token', session.token);
+          localStorage.setItem('lastUsername', input.username);
           
           set({
-            user,
-            token: tokens.accessToken,
+            user: { username: session.username },
+            token: session.token,
             isAuthenticated: true,
             isLoading: false,
           });
         } catch (error: any) {
-          set({
-            error: error.response?.data?.error?.message || '注册失败',
-            isLoading: false,
-          });
+          const errorMessage = error.response?.data?.error?.message || 'Login failed';
+          set({ error: errorMessage, isLoading: false });
           throw error;
         }
       },
@@ -83,9 +77,8 @@ export const useAuthStore = create<AuthState>()(
           console.error('Logout error:', error);
         }
         
-        // 清除本地存储
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
+        localStorage.removeItem('token');
+        localStorage.removeItem('auth-storage');
         
         set({
           user: null,
@@ -98,14 +91,14 @@ export const useAuthStore = create<AuthState>()(
       clearError: () => {
         set({ error: null });
       },
-
-      setUser: (user) => {
-        set({ user, isAuthenticated: !!user });
-      },
     }),
     {
       name: 'auth-storage',
-      partialize: (state) => ({ user: state.user, isAuthenticated: state.isAuthenticated }),
+      partialize: (state) => ({
+        user: state.user,
+        token: state.token,
+        isAuthenticated: state.isAuthenticated,
+      }),
     }
   )
 );

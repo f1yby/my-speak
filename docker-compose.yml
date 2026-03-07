@@ -1,7 +1,4 @@
-version: '3.8'
-
 services:
-  # PostgreSQL 数据库
   postgres:
     image: postgres:15-alpine
     container_name: myspeak_postgres
@@ -22,24 +19,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Redis 缓存
-  redis:
-    image: redis:7-alpine
-    container_name: myspeak_redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - myspeak_network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
-  # 开发用的后端服务
   backend:
     build:
       context: ./server
@@ -48,27 +27,41 @@ services:
     restart: unless-stopped
     ports:
       - "3001:3001"
-      - "10000-10100:10000-10100/udp"
     volumes:
       - ./server:/app
       - /app/node_modules
     environment:
       NODE_ENV: development
       DATABASE_URL: postgresql://myspeak_user:myspeak_password@postgres:5432/myspeak?schema=public
-      REDIS_URL: redis://redis:6379
       JWT_SECRET: dev-secret-key-change-in-production
       PORT: 3001
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
+    networks:
+      - myspeak_network
+
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile.dev
+    container_name: myspeak_frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      - backend
     networks:
       - myspeak_network
 
 volumes:
   postgres_data:
-  redis_data:
 
 networks:
   myspeak_network:

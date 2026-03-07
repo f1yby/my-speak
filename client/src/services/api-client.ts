@@ -7,13 +7,11 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  withCredentials: true,
 });
 
-// 请求拦截器 - 添加Token
 apiClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('accessToken');
+    const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -24,25 +22,14 @@ apiClient.interceptors.request.use(
   }
 );
 
-// 响应拦截器 - 处理错误
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const originalRequest = error.config;
-
-    // Token过期，尝试刷新
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
-      
-      // 这里可以实现Token刷新逻辑
-      // 暂时直接清除Token并跳转登录
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-      localStorage.removeItem('user');
-      
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('auth-storage');
       window.location.href = '/login';
     }
-
     return Promise.reject(error);
   }
 );

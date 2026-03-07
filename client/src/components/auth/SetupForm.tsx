@@ -1,64 +1,55 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth-store';
 
-export function LoginForm() {
+export function SetupForm() {
   const navigate = useNavigate();
-  const { login, isLoading, error, clearError, isSetup, checkSetup } = useAuthStore();
+  const { setup, isLoading, error, clearError, checkSetup } = useAuthStore();
   
-  const lastUsername = localStorage.getItem('lastUsername') || '';
-  
-  const [formData, setFormData] = useState({
-    username: lastUsername,
-    password: '',
-  });
-
-  useEffect(() => {
-    checkSetup();
-  }, [checkSetup]);
-
-  useEffect(() => {
-    if (isSetup === false) {
-      navigate('/setup');
-    }
-  }, [isSetup, navigate]);
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [validationError, setValidationError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     clearError();
+    setValidationError('');
+    
+    if (password.length < 6) {
+      setValidationError('Password must be at least 6 characters');
+      return;
+    }
+    
+    if (password !== confirmPassword) {
+      setValidationError('Passwords do not match');
+      return;
+    }
     
     try {
-      await login(formData);
-      navigate('/');
+      await setup({ password });
+      await checkSetup();
+      navigate('/login');
     } catch (err) {
       // Error handled in store
     }
   };
-
-  if (isSetup === null) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-900">
-        <div className="text-white">Loading...</div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-900">
       <div className="max-w-md w-full space-y-8 p-8 bg-gray-800 rounded-lg shadow-lg">
         <div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-white">
-            Welcome
+            Server Setup
           </h2>
           <p className="mt-2 text-center text-sm text-gray-400">
-            Enter server password and choose your name
+            Create the server password
           </p>
         </div>
         
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          {error && (
+          {(error || validationError) && (
             <div className="bg-red-900 border border-red-700 text-red-100 px-4 py-3 rounded">
-              {error}
+              {error || validationError}
             </div>
           )}
           
@@ -73,25 +64,25 @@ export function LoginForm() {
                 type="password"
                 required
                 className="input-field mt-1"
-                placeholder="Enter server password"
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                placeholder="At least 6 characters"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
               />
             </div>
             
             <div>
-              <label htmlFor="username" className="block text-sm font-medium text-gray-300">
-                Your Name
+              <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-300">
+                Confirm Password
               </label>
               <input
-                id="username"
-                name="username"
-                type="text"
+                id="confirmPassword"
+                name="confirmPassword"
+                type="password"
                 required
                 className="input-field mt-1"
-                placeholder="2-32 characters"
-                value={formData.username}
-                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                placeholder="Enter password again"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
               />
             </div>
           </div>
@@ -102,7 +93,7 @@ export function LoginForm() {
               disabled={isLoading}
               className="w-full btn-primary flex justify-center py-3"
             >
-              {isLoading ? 'Entering...' : 'Enter'}
+              {isLoading ? 'Setting up...' : 'Complete Setup'}
             </button>
           </div>
         </form>

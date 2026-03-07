@@ -1,0 +1,18 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# 安装系统依赖
+RUN apk add --no-cache git
+
+# 复制 package.json
+COPY package*.json ./
+
+# 安装依赖
+RUN npm install
+
+# 暴露端口
+EXPOSE 5173
+
+# 启动命令（允许外部访问）
+CMD ["npm", "run", "dev", "--", "--host"]
