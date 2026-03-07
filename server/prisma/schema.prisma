@@ -3,13 +3,13 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
 model ServerConfig {
   id           String   @id @default("default")
-  passwordHash String   @map("password_hash") @db.VarChar(255)
+  passwordHash String   @map("password_hash")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -17,9 +17,9 @@ model ServerConfig {
 }
 
 model Session {
-  id        String   @id @default(uuid()) @db.Uuid
-  token     String   @unique @db.VarChar(255)
-  username  String   @db.VarChar(64)
+  id        String   @id @default(uuid())
+  token     String   @unique
+  username  String
   expiresAt DateTime @map("expires_at")
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -28,21 +28,21 @@ model Session {
 }
 
 model Channel {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String   @unique @db.VarChar(100)
-  type      String   @default("TEXT") @db.VarChar(20)
+  id        String    @id @default(uuid())
+  name      String    @unique
+  type      String    @default("TEXT")
   messages  Message[]
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
   @@map("channels")
 }
 
 model Message {
-  id         String   @id @default(uuid()) @db.Uuid
-  channelId  String   @map("channel_id") @db.Uuid
-  authorName String   @map("author_name") @db.VarChar(64)
-  content    String   @db.Text
+  id         String   @id @default(uuid())
+  channelId  String   @map("channel_id")
+  authorName String   @map("author_name")
+  content    String
   createdAt  DateTime @default(now()) @map("created_at")
 
   channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)

@@ -2,6 +2,9 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Install SQLite and build dependencies
+RUN apk add --no-cache sqlite sqlite-dev python3 make g++
+
 COPY package*.json ./
 COPY prisma ./prisma/
 
@@ -10,6 +13,9 @@ RUN npm ci --only=production
 COPY . .
 
 RUN npx prisma generate
+
+# Create data directory for SQLite
+RUN mkdir -p /app/data
 
 EXPOSE 3001
 

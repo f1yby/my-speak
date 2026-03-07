@@ -20,7 +20,7 @@ echo "📦 Building backend..."
 docker-compose -f docker-compose.prod.yml build backend
 
 echo "🚀 Starting services..."
-docker-compose -f docker-compose.prod.yml up -d postgres backend
+docker-compose -f docker-compose.prod.yml up -d backend
 
 echo "⏳ Waiting for services to start..."
 sleep 5

@@ -1,32 +1,14 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: postgres:15-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: myspeak
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-myspeak_secure_password}
-      POSTGRES_DB: myspeak
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U myspeak"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - myspeak_network
-
   backend:
     build:
       context: ./server
       dockerfile: Dockerfile.prod
     restart: unless-stopped
     env_file: .env
-    depends_on:
-      postgres:
-        condition: service_healthy
+    volumes:
+      - sqlite_data:/app/data
     networks:
       - myspeak_network
     ports:
@@ -40,7 +22,7 @@ services:
       - myspeak_network
 
 volumes:
-  postgres_data:
+  sqlite_data:
 
 networks:
   myspeak_network:

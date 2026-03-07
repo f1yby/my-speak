@@ -2,23 +2,26 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# 安装系统依赖（mediasoup 编译需要 python、make、g++、invoke、linux-headers）
-RUN apk add --no-cache openssl python3 make g++ py3-pip py3-invoke linux-headers
+# Install SQLite and build dependencies
+RUN apk add --no-cache sqlite sqlite-dev python3 make g++
 
-# 复制 package.json
+# Copy package.json
 COPY package*.json ./
 
-# 安装依赖
+# Install dependencies
 RUN npm install
 
-# 复制 prisma schema
+# Copy prisma schema
 COPY prisma ./prisma/
 
-# 生成 Prisma 客户端
+# Generate Prisma client
 RUN npx prisma generate
 
-# 暴露端口
-EXPOSE 3001 10000-10100/udp
+# Create data directory for SQLite
+RUN mkdir -p /app/data
 
-# 启动命令
+# Expose port
+EXPOSE 3001
+
+# Start command
 CMD ["npm", "run", "dev"]
