@@ -3,7 +3,7 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Install SQLite and build dependencies
-RUN apk add --no-cache sqlite sqlite-dev python3 make g++
+RUN apk add --no-cache sqlite sqlite-dev openssl openssl-dev libc6-compat python3 make g++
 
 # Copy package.json
 COPY package*.json ./
