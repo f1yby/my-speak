@@ -58,7 +58,7 @@ uploads/server-icons/*
 *.sqlite3
 
 # Prisma
-prisma/migrations/*/migration_lock.toml
+server/prisma/migrations/
 
 # Docker
 .dockerignore
