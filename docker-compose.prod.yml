@@ -11,8 +11,6 @@ services:
       - sqlite_data:/app/data
     networks:
       - myspeak_network
-    ports:
-      - "3001:3001"
 
   frontend:
     build:
@@ -20,6 +18,10 @@ services:
       dockerfile: Dockerfile.prod
     networks:
       - myspeak_network
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
 
 volumes:
   sqlite_data:
