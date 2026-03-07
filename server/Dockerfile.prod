@@ -8,11 +8,18 @@ RUN apk add --no-cache sqlite sqlite-dev openssl openssl-dev libc6-compat python
 COPY package*.json ./
 COPY prisma ./prisma/
 
-RUN npm ci --only=production
+# Install all dependencies (including devDependencies for build)
+RUN npm ci
 
 COPY . .
 
 RUN npx prisma generate
+
+# Build TypeScript
+RUN npm run build
+
+# Prune devDependencies
+RUN npm prune --production
 
 # Create data directory for SQLite
 RUN mkdir -p /app/data
