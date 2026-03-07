@@ -4,6 +4,8 @@ import { useAuthStore } from '../../stores/auth-store';
 import { channelApi, type Channel } from '../../services/channel-api';
 import { messageApi, type Message } from '../../services/message-api';
 import { io, Socket } from 'socket.io-client';
+import { VoiceChannel } from '../voice/VoiceChannel';
+import { Hash, Volume2 } from 'lucide-react';
 
 export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -18,6 +20,8 @@ export const MainLayout: React.FC = () => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [showCreateChannel, setShowCreateChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
+  const [newChannelType, setNewChannelType] = useState<'TEXT' | 'VOICE'>('TEXT');
+  const [voiceChannelId, setVoiceChannelId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchChannels();
@@ -45,8 +49,11 @@ export const MainLayout: React.FC = () => {
       const channel = channels.find((c) => c.id === channelId);
       if (channel) {
         setCurrentChannel(channel);
-        fetchMessages(channelId);
-        socket?.emit('channel:join', channelId);
+        
+        if (channel.type === 'TEXT') {
+          fetchMessages(channelId);
+          socket?.emit('channel:join', channelId);
+        }
       }
     } else if (!channelId) {
       setCurrentChannel(null);
@@ -60,8 +67,9 @@ export const MainLayout: React.FC = () => {
       setChannels(data);
       setIsLoading(false);
       
-      if (data.length > 0 && !channelId) {
-        navigate(`/channels/${data[0].id}`);
+      const textChannels = data.filter(c => c.type === 'TEXT');
+      if (textChannels.length > 0 && !channelId) {
+        navigate(`/channels/${textChannels[0].id}`);
       }
     } catch (error) {
       console.error('Failed to fetch channels:', error);
@@ -79,6 +87,11 @@ export const MainLayout: React.FC = () => {
   };
 
   const handleSelectChannel = (channel: Channel) => {
+    if (channel.type === 'VOICE') {
+      setVoiceChannelId(channel.id);
+    } else {
+      setVoiceChannelId(null);
+    }
     navigate(`/channels/${channel.id}`);
   };
 
@@ -99,9 +112,13 @@ export const MainLayout: React.FC = () => {
     if (!newChannelName.trim()) return;
     
     try {
-      const channel = await channelApi.createChannel({ name: newChannelName.trim() });
+      const channel = await channelApi.createChannel({ 
+        name: newChannelName.trim(),
+        type: newChannelType,
+      });
       setChannels([...channels, channel]);
       setNewChannelName('');
+      setNewChannelType('TEXT');
       setShowCreateChannel(false);
       navigate(`/channels/${channel.id}`);
     } catch (error) {
@@ -109,13 +126,16 @@ export const MainLayout: React.FC = () => {
     }
   };
 
-  const handleDeleteChannel = async (channelId: string) => {
+  const handleDeleteChannel = async (chId: string) => {
     try {
-      await channelApi.deleteChannel(channelId);
-      setChannels(channels.filter((c) => c.id !== channelId));
-      if (currentChannel?.id === channelId) {
-        const remaining = channels.filter((c) => c.id !== channelId);
-        if (remaining.length > 0) {
+      await channelApi.deleteChannel(chId);
+      setChannels(channels.filter((c) => c.id !== chId));
+      if (currentChannel?.id === chId) {
+        const remaining = channels.filter((c) => c.id !== chId);
+        const textChannels = remaining.filter(c => c.type === 'TEXT');
+        if (textChannels.length > 0) {
+          navigate(`/channels/${textChannels[0].id}`);
+        } else if (remaining.length > 0) {
           navigate(`/channels/${remaining[0].id}`);
         } else {
           navigate('/');
@@ -130,6 +150,9 @@ export const MainLayout: React.FC = () => {
     await logout();
     navigate('/login');
   };
+
+  const textChannels = channels.filter(c => c.type === 'TEXT');
+  const voiceChannels = channels.filter(c => c.type === 'VOICE');
 
   if (isLoading) {
     return (
@@ -150,17 +173,21 @@ export const MainLayout: React.FC = () => {
         
         {/* Channels */}
         <div className="flex-1 overflow-y-auto p-2">
+          {/* Text Channels */}
           <div className="flex items-center justify-between px-2 py-1">
-            <span className="text-xs font-semibold text-gray-400 uppercase">Channels</span>
+            <span className="text-xs font-semibold text-gray-400 uppercase flex items-center">
+              <Hash className="w-3 h-3 mr-1" />
+              Text
+            </span>
             <button
-              onClick={() => setShowCreateChannel(true)}
+              onClick={() => { setNewChannelType('TEXT'); setShowCreateChannel(true); }}
               className="text-gray-400 hover:text-white"
             >
               +
             </button>
           </div>
           
-          {channels.map((channel) => (
+          {textChannels.map((channel) => (
             <div
               key={channel.id}
               className={`group flex items-center justify-between px-2 py-1 rounded cursor-pointer ${
@@ -171,14 +198,48 @@ export const MainLayout: React.FC = () => {
               onClick={() => handleSelectChannel(channel)}
             >
               <span className="flex items-center">
-                <span className="text-gray-400 mr-1">#</span>
+                <Hash className="w-4 h-4 text-gray-400 mr-1" />
                 {channel.name}
               </span>
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDeleteChannel(channel.id);
-                }}
+                onClick={(e) => { e.stopPropagation(); handleDeleteChannel(channel.id); }}
+                className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+
+          {/* Voice Channels */}
+          <div className="flex items-center justify-between px-2 py-1 mt-4">
+            <span className="text-xs font-semibold text-gray-400 uppercase flex items-center">
+              <Volume2 className="w-3 h-3 mr-1" />
+              Voice
+            </span>
+            <button
+              onClick={() => { setNewChannelType('VOICE'); setShowCreateChannel(true); }}
+              className="text-gray-400 hover:text-white"
+            >
+              +
+            </button>
+          </div>
+          
+          {voiceChannels.map((channel) => (
+            <div
+              key={channel.id}
+              className={`group flex items-center justify-between px-2 py-1 rounded cursor-pointer ${
+                voiceChannelId === channel.id
+                  ? 'bg-gray-700 text-white'
+                  : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+              }`}
+              onClick={() => handleSelectChannel(channel)}
+            >
+              <span className="flex items-center">
+                <Volume2 className="w-4 h-4 text-gray-400 mr-1" />
+                {channel.name}
+              </span>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleDeleteChannel(channel.id); }}
                 className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400"
               >
                 ×
@@ -186,6 +247,16 @@ export const MainLayout: React.FC = () => {
             </div>
           ))}
         </div>
+        
+        {/* Voice Channel Panel */}
+        {voiceChannelId && socket && (
+          <VoiceChannel
+            channelId={voiceChannelId}
+            channelName={voiceChannels.find(c => c.id === voiceChannelId)?.name || 'Voice'}
+            socket={socket}
+            onLeave={() => setVoiceChannelId(null)}
+          />
+        )}
         
         {/* User */}
         <div className="h-14 px-4 flex items-center justify-between border-t border-gray-700 bg-gray-800">
@@ -201,11 +272,11 @@ export const MainLayout: React.FC = () => {
       
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
-        {currentChannel ? (
+        {currentChannel && currentChannel.type === 'TEXT' ? (
           <>
             {/* Channel Header */}
             <div className="h-12 px-4 flex items-center border-b border-gray-700 bg-gray-800">
-              <span className="text-gray-400 mr-1">#</span>
+              <Hash className="w-5 h-5 text-gray-400 mr-2" />
               <span className="font-semibold text-white">{currentChannel.name}</span>
             </div>
             
@@ -250,6 +321,14 @@ export const MainLayout: React.FC = () => {
               </form>
             </div>
           </>
+        ) : currentChannel && currentChannel.type === 'VOICE' ? (
+          <div className="flex-1 flex items-center justify-center bg-gray-700">
+            <div className="text-center">
+              <Volume2 className="w-16 h-16 text-gray-500 mx-auto mb-4" />
+              <p className="text-gray-400 text-lg">Voice Channel: {currentChannel.name}</p>
+              <p className="text-gray-500 text-sm mt-2">Click "Join Voice" in the sidebar to connect</p>
+            </div>
+          </div>
         ) : (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center text-gray-400">
@@ -264,7 +343,7 @@ export const MainLayout: React.FC = () => {
                   </button>
                 </div>
               ) : (
-                <p>Select a channel to start chatting</p>
+                <p>Select a channel to start</p>
               )}
             </div>
           </div>
@@ -277,6 +356,34 @@ export const MainLayout: React.FC = () => {
           <div className="bg-gray-800 rounded-lg p-6 w-96">
             <h2 className="text-lg font-semibold text-white mb-4">Create Channel</h2>
             <form onSubmit={handleCreateChannel}>
+              <div className="mb-4">
+                <label className="block text-sm text-gray-400 mb-2">Channel Type</label>
+                <div className="flex space-x-4">
+                  <label className="flex items-center cursor-pointer">
+                    <input
+                      type="radio"
+                      value="TEXT"
+                      checked={newChannelType === 'TEXT'}
+                      onChange={() => setNewChannelType('TEXT')}
+                      className="mr-2"
+                    />
+                    <Hash className="w-4 h-4 mr-1" />
+                    Text
+                  </label>
+                  <label className="flex items-center cursor-pointer">
+                    <input
+                      type="radio"
+                      value="VOICE"
+                      checked={newChannelType === 'VOICE'}
+                      onChange={() => setNewChannelType('VOICE')}
+                      className="mr-2"
+                    />
+                    <Volume2 className="w-4 h-4 mr-1" />
+                    Voice
+                  </label>
+                </div>
+              </div>
+              
               <input
                 type="text"
                 value={newChannelName}

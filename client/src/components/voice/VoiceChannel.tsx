@@ -1,0 +1,179 @@
+import React, { useEffect, useState, useCallback } from 'react';
+import { Mic, MicOff, Volume2, VolumeX, Phone, PhoneOff, Users } from 'lucide-react';
+import { voiceService, type VoiceParticipant } from '../../services/voice-service';
+
+interface VoiceChannelProps {
+  channelId: string;
+  channelName: string;
+  socket: any;
+  onLeave?: () => void;
+}
+
+export const VoiceChannel: React.FC<VoiceChannelProps> = ({
+  channelId,
+  channelName,
+  socket,
+  onLeave,
+}) => {
+  const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isDeafened, setIsDeafened] = useState(false);
+  const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    voiceService.setSocket(socket);
+    voiceService.setCallbacks({
+      onParticipantJoined: (participant) => {
+        setParticipants((prev) => [...prev.filter(p => p.socketId !== participant.socketId), participant]);
+      },
+      onParticipantLeft: (socketId) => {
+        setParticipants((prev) => prev.filter((p) => p.socketId !== socketId));
+      },
+      onParticipantMuted: (socketId, muted) => {
+        setParticipants((prev) =>
+          prev.map((p) => (p.socketId === socketId ? { ...p, isMuted: muted } : p))
+        );
+      },
+      onParticipantDeafened: (socketId, deafened) => {
+        setParticipants((prev) =>
+          prev.map((p) => (p.socketId === socketId ? { ...p, isDeafened: deafened } : p))
+        );
+      },
+      onError: (err) => {
+        setError(err);
+        setIsConnecting(false);
+      },
+    });
+
+    voiceService.setupSocketHandlers();
+
+    return () => {
+      voiceService.leaveChannel();
+    };
+  }, [socket]);
+
+  const handleJoin = async () => {
+    setIsConnecting(true);
+    setError(null);
+
+    const success = await voiceService.joinChannel(channelId);
+    
+    if (success) {
+      setIsConnected(true);
+      setIsMuted(false);
+      setIsDeafened(false);
+    }
+    
+    setIsConnecting(false);
+  };
+
+  const handleLeave = () => {
+    voiceService.leaveChannel();
+    setIsConnected(false);
+    setParticipants([]);
+    onLeave?.();
+  };
+
+  const handleToggleMute = () => {
+    const muted = voiceService.toggleMute();
+    setIsMuted(muted);
+  };
+
+  const handleToggleDeafen = () => {
+    const deafened = voiceService.toggleDeafen();
+    setIsDeafened(deafened);
+  };
+
+  if (!isConnected) {
+    return (
+      <div className="p-4 border-t border-gray-700">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-semibold text-gray-300">🔊 {channelName}</span>
+        </div>
+        {error && (
+          <div className="mb-2 text-sm text-red-400">{error}</div>
+        )}
+        <button
+          onClick={handleJoin}
+          disabled={isConnecting}
+          className="w-full flex items-center justify-center space-x-2 bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded transition-colors disabled:opacity-50"
+        >
+          <Phone className="w-4 h-4" />
+          <span>{isConnecting ? 'Connecting...' : 'Join Voice'}</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 border-t border-gray-700 bg-gray-800">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm font-semibold text-green-400">🔊 {channelName}</span>
+        <span className="text-xs text-gray-400 flex items-center">
+          <Users className="w-3 h-3 mr-1" />
+          {participants.length + 1}
+        </span>
+      </div>
+
+      {error && (
+        <div className="mb-2 text-sm text-red-400">{error}</div>
+      )}
+
+      <div className="space-y-1 mb-3 max-h-32 overflow-y-auto">
+        <div className="flex items-center space-x-2 text-sm">
+          <div className="w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center text-xs">
+            Y
+          </div>
+          <span className="text-gray-300">You</span>
+          {isMuted && <MicOff className="w-3 h-3 text-red-400" />}
+          {isDeafened && <VolumeX className="w-3 h-3 text-red-400" />}
+        </div>
+        
+        {participants.map((participant) => (
+          <div key={participant.socketId} className="flex items-center space-x-2 text-sm">
+            <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs">
+              {participant.username[0].toUpperCase()}
+            </div>
+            <span className="text-gray-300">{participant.username}</span>
+            {participant.isMuted && <MicOff className="w-3 h-3 text-red-400" />}
+            {participant.isDeafened && <VolumeX className="w-3 h-3 text-red-400" />}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div className="flex space-x-2">
+          <button
+            onClick={handleToggleMute}
+            className={`p-2 rounded transition-colors ${
+              isMuted ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-700 hover:bg-gray-600'
+            }`}
+            title={isMuted ? 'Unmute' : 'Mute'}
+          >
+            {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+          </button>
+          
+          <button
+            onClick={handleToggleDeafen}
+            className={`p-2 rounded transition-colors ${
+              isDeafened ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-700 hover:bg-gray-600'
+            }`}
+            title={isDeafened ? 'Undeafen' : 'Deafen'}
+          >
+            {isDeafened ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
+        </div>
+
+        <button
+          onClick={handleLeave}
+          className="p-2 bg-red-600 hover:bg-red-700 rounded transition-colors"
+          title="Leave Voice"
+        >
+          <PhoneOff className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+};

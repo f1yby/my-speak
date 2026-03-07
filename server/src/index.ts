@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
-import { Server as SocketIOServer } from 'socket.io';
+import { Server as SocketIOServer, Socket } from 'socket.io';
 import authRoutes from './api/routes/auth.routes';
 import channelRoutes from './api/routes/channel.routes';
 import messageRoutes from './api/routes/message.routes';
@@ -46,7 +46,14 @@ app.use('/api/auth', authRoutes);
 app.use('/api/channels', channelRoutes);
 app.use('/api/channels/:channelId/messages', messageRoutes);
 
-const userSockets = new Map<string, Set<string>>();
+interface VoiceParticipant {
+  socketId: string;
+  username: string;
+  isMuted: boolean;
+  isDeafened: boolean;
+}
+
+const voiceChannels = new Map<string, Map<string, VoiceParticipant>>();
 
 io.use(async (socket, next) => {
   const token = socket.handshake.auth.token;
@@ -69,12 +76,8 @@ io.on('connection', async (socket) => {
   const username = (socket as any).username;
   console.log(`User connected: ${username} (${socket.id})`);
   
-  if (!userSockets.has(username)) {
-    userSockets.set(username, new Set());
-  }
-  userSockets.get(username)!.add(socket.id);
-  
   let currentChannelId: string | null = null;
+  let currentVoiceChannelId: string | null = null;
 
   socket.on('channel:join', async (channelId: string) => {
     if (currentChannelId) {
@@ -107,17 +110,111 @@ io.on('connection', async (socket) => {
     io.to(`channel:${data.channelId}`).emit('message:new', message);
   });
 
-  socket.on('disconnect', () => {
-    console.log(`User disconnected: ${username} (${socket.id})`);
+  // Voice channel events
+  socket.on('voice:join', (channelId: string) => {
+    if (currentVoiceChannelId) {
+      leaveVoiceChannel(socket, currentVoiceChannelId);
+    }
     
-    const sockets = userSockets.get(username);
-    if (sockets) {
-      sockets.delete(socket.id);
-      if (sockets.size === 0) {
-        userSockets.delete(username);
+    currentVoiceChannelId = channelId;
+    socket.join(`voice:${channelId}`);
+    
+    if (!voiceChannels.has(channelId)) {
+      voiceChannels.set(channelId, new Map());
+    }
+    
+    const participants = voiceChannels.get(channelId)!;
+    participants.set(socket.id, {
+      socketId: socket.id,
+      username,
+      isMuted: false,
+      isDeafened: false,
+    });
+    
+    const existingParticipants = Array.from(participants.values()).filter(
+      (p) => p.socketId !== socket.id
+    );
+    
+    socket.emit('voice:participants', existingParticipants);
+    
+    socket.to(`voice:${channelId}`).emit('voice:user-joined', {
+      socketId: socket.id,
+      username,
+      isMuted: false,
+      isDeafened: false,
+    });
+    
+    console.log(`User ${username} joined voice channel ${channelId}`);
+  });
+
+  socket.on('voice:leave', () => {
+    if (currentVoiceChannelId) {
+      leaveVoiceChannel(socket, currentVoiceChannelId);
+      currentVoiceChannelId = null;
+    }
+  });
+
+  socket.on('voice:signal', (data: { to: string; signal: any }) => {
+    io.to(data.to).emit('voice:signal', {
+      from: socket.id,
+      signal: data.signal,
+    });
+  });
+
+  socket.on('voice:mute', (isMuted: boolean) => {
+    if (currentVoiceChannelId) {
+      const participants = voiceChannels.get(currentVoiceChannelId);
+      if (participants) {
+        const participant = participants.get(socket.id);
+        if (participant) {
+          participant.isMuted = isMuted;
+          socket.to(`voice:${currentVoiceChannelId}`).emit('voice:user-muted', {
+            socketId: socket.id,
+            isMuted,
+          });
+        }
       }
     }
   });
+
+  socket.on('voice:deafen', (isDeafened: boolean) => {
+    if (currentVoiceChannelId) {
+      const participants = voiceChannels.get(currentVoiceChannelId);
+      if (participants) {
+        const participant = participants.get(socket.id);
+        if (participant) {
+          participant.isDeafened = isDeafened;
+          socket.to(`voice:${currentVoiceChannelId}`).emit('voice:user-deafened', {
+            socketId: socket.id,
+            isDeafened,
+          });
+        }
+      }
+    }
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`User disconnected: ${username} (${socket.id})`);
+    
+    if (currentVoiceChannelId) {
+      leaveVoiceChannel(socket, currentVoiceChannelId);
+    }
+  });
+
+  function leaveVoiceChannel(sock: Socket, channelId: string) {
+    sock.leave(`voice:${channelId}`);
+    
+    const participants = voiceChannels.get(channelId);
+    if (participants) {
+      participants.delete(sock.id);
+      if (participants.size === 0) {
+        voiceChannels.delete(channelId);
+      }
+    }
+    
+    sock.to(`voice:${channelId}`).emit('voice:user-left', { socketId: sock.id });
+    console.log(`User ${username} left voice channel ${channelId}`);
+  }
 });
 
 setInterval(async () => {

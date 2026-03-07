@@ -47,11 +47,22 @@ export async function getChannel(req: Request, res: Response): Promise<void> {
 export async function createChannel(req: Request, res: Response): Promise<void> {
   try {
     const { name, type } = req.body;
+    console.log('Create channel request:', { name, type });
     
     if (!name || name.trim().length < 1 || name.length > 100) {
+      console.log('Invalid name:', name);
       res.status(400).json({
         success: false,
         error: { code: 'INVALID_NAME', message: 'Channel name must be 1-100 characters' },
+      });
+      return;
+    }
+    
+    if (type && !['TEXT', 'VOICE'].includes(type)) {
+      console.log('Invalid type:', type);
+      res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_TYPE', message: 'Channel type must be TEXT or VOICE' },
       });
       return;
     }
@@ -67,6 +78,7 @@ export async function createChannel(req: Request, res: Response): Promise<void> 
     });
   } catch (error) {
     if (error instanceof ChannelError) {
+      console.log('ChannelError:', error.message);
       res.status(400).json({
         success: false,
         error: { code: error.code, message: error.message },

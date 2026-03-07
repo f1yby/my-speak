@@ -1,446 +1,286 @@
-import * as mediasoupClient from 'mediasoup-client';
-import { Device } from 'mediasoup-client';
-import type {
-  Transport,
-  Producer,
-  Consumer,
-} from 'mediasoup-client/lib/types';
-import { io, Socket } from 'socket.io-client';
-import { VADService } from './vad-service';
+import { Socket } from 'socket.io-client';
 
 export interface VoiceParticipant {
-  userId: string;
+  socketId: string;
   username: string;
-  displayName: string;
-  avatar: string | null;
-  producerId: string | null;
   isMuted: boolean;
   isDeafened: boolean;
-  isSpeaking: boolean;
 }
 
-interface VoiceState {
-  isConnected: boolean;
-  isConnecting: boolean;
-  isMuted: boolean;
-  isDeafened: boolean;
-  participants: VoiceParticipant[];
-  error: string | null;
-  currentChannelId: string | null;
-  currentServerId: string | null;
-}
-
-interface VoiceCallbacks {
-  onParticipantJoined?: (participant: VoiceParticipant) => void;
-  onParticipantLeft?: (userId: string) => void;
-  onParticipantMuted?: (userId: string, isMuted: boolean) => void;
-  onParticipantDeafened?: (userId: string, isDeafened: boolean) => void;
-  onParticipantSpeaking?: (userId: string, isSpeaking: boolean) => void;
-  onAudioStream?: (userId: string, stream: MediaStream) => void;
-  onError?: (error: string) => void;
-  onConnected?: () => void;
-  onDisconnected?: () => void;
-  onLocalSpeakingChange?: (isSpeaking: boolean) => void;
-}
-
-class VoiceService {
+export class VoiceService {
   private socket: Socket | null = null;
-  private device: Device | null = null;
-  private sendTransport: Transport | null = null;
-  private recvTransport: Transport | null = null;
-  private producer: Producer | null = null;
-  private consumers: Map<string, Consumer> = new Map();
   private localStream: MediaStream | null = null;
-  private callbacks: VoiceCallbacks = {};
-  private state: VoiceState = {
-    isConnected: false,
-    isConnecting: false,
-    isMuted: false,
-    isDeafened: false,
-    participants: [],
-    error: null,
-    currentChannelId: null,
-    currentServerId: null,
-  };
-  private vad: VADService | null = null;
-  private isLocalSpeaking = false;
+  private peerConnections: Map<string, RTCPeerConnection> = new Map();
+  private remoteStreams: Map<string, MediaStream> = new Map();
+  private audioElements: Map<string, HTMLAudioElement> = new Map();
+  private channelId: string = '';
+  private isMuted: boolean = false;
+  private isDeafened: boolean = false;
+  
+  private readonly ICE_SERVERS = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ];
 
-  constructor() {
-    this.initializeSocket();
+  private onParticipantJoined?: (participant: VoiceParticipant) => void;
+  private onParticipantLeft?: (socketId: string) => void;
+  private onParticipantMuted?: (socketId: string, isMuted: boolean) => void;
+  private onParticipantDeafened?: (socketId: string, isDeafened: boolean) => void;
+  private onError?: (error: string) => void;
+
+  setSocket(socket: Socket): void {
+    this.socket = socket;
   }
 
-  private initializeSocket() {
-    const serverUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-    
-    this.socket = io(serverUrl, {
-      withCredentials: true,
-      transports: ['websocket'],
+  setCallbacks(callbacks: {
+    onParticipantJoined?: (participant: VoiceParticipant) => void;
+    onParticipantLeft?: (socketId: string) => void;
+    onParticipantMuted?: (socketId: string, isMuted: boolean) => void;
+    onParticipantDeafened?: (socketId: string, isDeafened: boolean) => void;
+    onError?: (error: string) => void;
+  }): void {
+    this.onParticipantJoined = callbacks.onParticipantJoined;
+    this.onParticipantLeft = callbacks.onParticipantLeft;
+    this.onParticipantMuted = callbacks.onParticipantMuted;
+    this.onParticipantDeafened = callbacks.onParticipantDeafened;
+    this.onError = callbacks.onError;
+  }
+
+  setupSocketHandlers(): void {
+    if (!this.socket) return;
+
+    this.socket.on('voice:participants', (participants: VoiceParticipant[]) => {
+      participants.forEach((p) => {
+        this.onParticipantJoined?.(p);
+        this.createPeerConnection(p.socketId, true);
+      });
     });
 
-    this.socket.on('connect', () => {
-      console.log('Socket connected');
+    this.socket.on('voice:user-joined', (participant: VoiceParticipant) => {
+      this.onParticipantJoined?.(participant);
+      this.createPeerConnection(participant.socketId, false);
     });
 
-    this.socket.on('disconnect', () => {
-      console.log('Socket disconnected');
-      this.cleanup();
+    this.socket.on('voice:user-left', ({ socketId }: { socketId: string }) => {
+      this.closePeerConnection(socketId);
+      this.onParticipantLeft?.(socketId);
     });
 
-    this.socket.on('voice:user-joined', ({ participant }: { participant: VoiceParticipant }) => {
-      this.state.participants.push(participant);
-      this.callbacks.onParticipantJoined?.(participant);
+    this.socket.on('voice:user-muted', ({ socketId, isMuted }: { socketId: string; isMuted: boolean }) => {
+      this.onParticipantMuted?.(socketId, isMuted);
     });
 
-    this.socket.on('voice:user-left', ({ userId }: { userId: string }) => {
-      this.state.participants = this.state.participants.filter(
-        (p) => p.userId !== userId
-      );
-      this.callbacks.onParticipantLeft?.(userId);
-      
-      const consumer = this.consumers.get(userId);
-      if (consumer) {
-        consumer.close();
-        this.consumers.delete(userId);
-      }
+    this.socket.on('voice:user-deafened', ({ socketId, isDeafened }: { socketId: string; isDeafened: boolean }) => {
+      this.onParticipantDeafened?.(socketId, isDeafened);
     });
 
-    this.socket.on('voice:user-muted', ({ userId, isMuted }: { userId: string; isMuted: boolean }) => {
-      const participant = this.state.participants.find((p) => p.userId === userId);
-      if (participant) {
-        participant.isMuted = isMuted;
-      }
-      this.callbacks.onParticipantMuted?.(userId, isMuted);
-    });
-
-    this.socket.on('voice:user-deafened', ({ userId, isDeafened }: { userId: string; isDeafened: boolean }) => {
-      const participant = this.state.participants.find((p) => p.userId === userId);
-      if (participant) {
-        participant.isDeafened = isDeafened;
-      }
-      this.callbacks.onParticipantDeafened?.(userId, isDeafened);
-    });
-
-    this.socket.on('voice:user-speaking', ({ userId, isSpeaking }: { userId: string; isSpeaking: boolean }) => {
-      const participant = this.state.participants.find((p) => p.userId === userId);
-      if (participant) {
-        participant.isSpeaking = isSpeaking;
-      }
-      this.callbacks.onParticipantSpeaking?.(userId, isSpeaking);
-    });
-
-    this.socket.on('voice:new-producer', async ({ userId, producerId }: { userId: string; producerId: string }) => {
-      if (!this.device || !this.recvTransport) return;
-      
-      try {
-        await this.consume(userId, producerId);
-      } catch (error) {
-        console.error('Failed to consume new producer:', error);
-      }
+    this.socket.on('voice:signal', async ({ from, signal }: { from: string; signal: any }) => {
+      await this.handleSignal(from, signal);
     });
   }
 
-  setCallbacks(callbacks: VoiceCallbacks) {
-    this.callbacks = { ...this.callbacks, ...callbacks };
-  }
-
-  getState(): VoiceState {
-    return { ...this.state };
-  }
-
-  async joinVoiceChannel(
-    channelId: string,
-    serverId: string,
-    userId: string
-  ): Promise<boolean> {
-    if (this.state.isConnecting || this.state.isConnected) {
+  async joinChannel(channelId: string): Promise<boolean> {
+    if (!this.socket) {
+      this.onError?.('Not connected to server');
       return false;
     }
 
-    this.state.isConnecting = true;
-    this.state.error = null;
+    this.channelId = channelId;
 
     try {
       this.localStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          sampleRate: 48000,
+          autoGainControl: true,
         },
+        video: false,
       });
 
-      // Initialize VAD for local audio
-      this.vad = new VADService({
-        threshold: -50,
-        onSpeakingChange: (isSpeaking) => {
-          if (this.isLocalSpeaking !== isSpeaking) {
-            this.isLocalSpeaking = isSpeaking;
-            this.socket?.emit('voice:speaking', { isSpeaking });
-            this.callbacks.onLocalSpeakingChange?.(isSpeaking);
-          }
-        },
-      });
-      await this.vad.start(this.localStream);
-
-      const response = await this.emitWithAck('voice:join', {
-        channelId,
-        serverId,
-        userId,
-      });
-
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to join voice channel');
+      if (this.isMuted) {
+        this.localStream.getAudioTracks().forEach((track) => {
+          track.enabled = false;
+        });
       }
 
-      const { routerRtpCapabilities, participants } = response.data;
-
-      this.device = new Device();
-      await this.device.load({ routerRtpCapabilities });
-
-      await this.createSendTransport();
-      await this.createRecvTransport();
-      await this.startProducing();
-
-      for (const participant of participants) {
-        if (participant.producerId) {
-          await this.consume(participant.userId, participant.producerId);
-        }
-      }
-
-      this.state.isConnected = true;
-      this.state.isConnecting = false;
-      this.state.currentChannelId = channelId;
-      this.state.currentServerId = serverId;
-      this.state.participants = participants;
-
-      this.callbacks.onConnected?.();
-      
+      this.socket.emit('voice:join', channelId);
       return true;
     } catch (error) {
-      this.state.isConnecting = false;
-      this.state.error = error instanceof Error ? error.message : 'Unknown error';
-      this.callbacks.onError?.(this.state.error);
-      this.cleanup();
-      
+      const message = error instanceof Error ? error.message : 'Failed to get microphone access';
+      this.onError?.(message);
       return false;
     }
   }
 
-  private async createSendTransport() {
-    if (!this.socket || !this.device) return;
-
-    const response = await this.emitWithAck('voice:create-send-transport', {});
-
-    if (!response.success) {
-      throw new Error(response.error || 'Failed to create send transport');
+  private createPeerConnection(socketId: string, isInitiator: boolean): RTCPeerConnection {
+    if (this.peerConnections.has(socketId)) {
+      return this.peerConnections.get(socketId)!;
     }
 
-    const { id, iceParameters, iceCandidates, dtlsParameters } = response.data;
+    const pc = new RTCPeerConnection({ iceServers: this.ICE_SERVERS });
+    this.peerConnections.set(socketId, pc);
 
-    this.sendTransport = this.device.createSendTransport({
-      id,
-      iceParameters,
-      iceCandidates,
-      dtlsParameters,
-    });
-
-    this.sendTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
-      this.emitWithAck('voice:connect-transport', {
-        direction: 'send',
-        dtlsParameters,
-      })
-        .then(() => callback())
-        .catch(errback);
-    });
-
-    this.sendTransport.on('produce', ({ kind, rtpParameters }, callback, errback) => {
-      this.emitWithAck('voice:produce', { rtpParameters })
-        .then((response) => {
-          if (response.success) {
-            callback({ id: response.data.producerId });
-          } else {
-            errback(new Error(response.error));
-          }
-        })
-        .catch(errback);
-    });
-  }
-
-  private async createRecvTransport() {
-    if (!this.socket || !this.device) return;
-
-    const response = await this.emitWithAck('voice:create-recv-transport', {});
-
-    if (!response.success) {
-      throw new Error(response.error || 'Failed to create receive transport');
+    if (this.localStream) {
+      this.localStream.getTracks().forEach((track) => {
+        pc.addTrack(track, this.localStream!);
+      });
     }
 
-    const { id, iceParameters, iceCandidates, dtlsParameters } = response.data;
+    pc.ontrack = (event) => {
+      const [stream] = event.streams;
+      this.remoteStreams.set(socketId, stream);
+      
+      let audio = this.audioElements.get(socketId);
+      if (!audio) {
+        audio = new Audio();
+        audio.autoplay = true;
+        this.audioElements.set(socketId, audio);
+      }
+      audio.srcObject = stream;
+      
+      if (this.isDeafened) {
+        audio.muted = true;
+      }
+    };
 
-    this.recvTransport = this.device.createRecvTransport({
-      id,
-      iceParameters,
-      iceCandidates,
-      dtlsParameters,
-    });
+    pc.onicecandidate = (event) => {
+      if (event.candidate && this.socket) {
+        this.socket.emit('voice:signal', {
+          to: socketId,
+          signal: { type: 'ice', candidate: event.candidate },
+        });
+      }
+    };
 
-    this.recvTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
-      this.emitWithAck('voice:connect-transport', {
-        direction: 'recv',
-        dtlsParameters,
-      })
-        .then(() => callback())
-        .catch(errback);
-    });
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        this.closePeerConnection(socketId);
+      }
+    };
+
+    if (isInitiator) {
+      this.createOffer(socketId);
+    }
+
+    return pc;
   }
 
-  private async startProducing() {
-    if (!this.sendTransport || !this.localStream) return;
+  private async createOffer(socketId: string): Promise<void> {
+    const pc = this.peerConnections.get(socketId);
+    if (!pc || !this.socket) return;
 
-    const audioTrack = this.localStream.getAudioTracks()[0];
-    if (!audioTrack) return;
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      
+      this.socket.emit('voice:signal', {
+        to: socketId,
+        signal: { type: 'offer', sdp: offer },
+      });
+    } catch (error) {
+      console.error('Failed to create offer:', error);
+    }
+  }
 
-    this.producer = await this.sendTransport.produce({ track: audioTrack });
+  private async handleSignal(from: string, signal: any): Promise<void> {
+    if (!this.socket) return;
+
+    let pc = this.peerConnections.get(from);
     
-    if (this.state.isMuted) {
-      this.producer.pause();
+    if (!pc) {
+      pc = this.createPeerConnection(from, false);
+    }
+
+    try {
+      if (signal.type === 'offer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        
+        this.socket.emit('voice:signal', {
+          to: from,
+          signal: { type: 'answer', sdp: answer },
+        });
+      } else if (signal.type === 'answer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+      } else if (signal.type === 'ice') {
+        await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+      }
+    } catch (error) {
+      console.error('Failed to handle signal:', error);
     }
   }
 
-  private async consume(userId: string, producerId: string) {
-    if (!this.device || !this.recvTransport) return;
-
-    const response = await this.emitWithAck('voice:consume', {
-      producerId,
-      rtpCapabilities: this.device.rtpCapabilities,
-    });
-
-    if (!response.success || !response.data) {
-      console.warn('Failed to consume producer:', response.error);
-      return;
+  private closePeerConnection(socketId: string): void {
+    const pc = this.peerConnections.get(socketId);
+    if (pc) {
+      pc.close();
+      this.peerConnections.delete(socketId);
     }
-
-    const { id, kind, rtpParameters } = response.data;
-
-    const consumer = await this.recvTransport.consume({
-      id,
-      producerId,
-      kind,
-      rtpParameters,
-    });
-
-    this.consumers.set(userId, consumer);
-
-    await this.emitWithAck('voice:resume-consumer', { consumerId: id });
-
-    const stream = new MediaStream([consumer.track]);
-    this.callbacks.onAudioStream?.(userId, stream);
-  }
-
-  async leaveVoiceChannel(): Promise<void> {
-    if (!this.state.isConnected && !this.state.isConnecting) {
-      return;
+    
+    this.remoteStreams.delete(socketId);
+    
+    const audio = this.audioElements.get(socketId);
+    if (audio) {
+      audio.pause();
+      audio.srcObject = null;
+      this.audioElements.delete(socketId);
     }
-
-    if (this.socket) {
-      await this.emitWithAck('voice:leave', {});
-    }
-
-    this.cleanup();
-
-    this.state.isConnected = false;
-    this.state.isConnecting = false;
-    this.state.participants = [];
-    this.state.currentChannelId = null;
-    this.state.currentServerId = null;
-
-    this.callbacks.onDisconnected?.();
   }
 
   toggleMute(): boolean {
-    if (!this.producer) return this.state.isMuted;
-
-    this.state.isMuted = !this.state.isMuted;
-
-    if (this.state.isMuted) {
-      this.producer.pause();
-    } else {
-      this.producer.resume();
+    this.isMuted = !this.isMuted;
+    
+    if (this.localStream) {
+      this.localStream.getAudioTracks().forEach((track) => {
+        track.enabled = !this.isMuted;
+      });
     }
-
-    this.socket?.emit('voice:toggle-mute', { isMuted: this.state.isMuted });
-
-    return this.state.isMuted;
+    
+    this.socket?.emit('voice:mute', this.isMuted);
+    return this.isMuted;
   }
 
   toggleDeafen(): boolean {
-    this.state.isDeafened = !this.state.isDeafened;
-
-    for (const consumer of this.consumers.values()) {
-      if (this.state.isDeafened) {
-        consumer.pause();
-      } else {
-        consumer.resume();
-      }
-    }
-
-    this.socket?.emit('voice:toggle-deafen', { isDeafened: this.state.isDeafened });
-
-    return this.state.isDeafened;
+    this.isDeafened = !this.isDeafened;
+    
+    this.audioElements.forEach((audio) => {
+      audio.muted = this.isDeafened;
+    });
+    
+    this.socket?.emit('voice:deafen', this.isDeafened);
+    return this.isDeafened;
   }
 
-  private cleanup() {
-    if (this.vad) {
-      this.vad.stop();
-      this.vad = null;
-    }
+  getIsMuted(): boolean {
+    return this.isMuted;
+  }
 
-    if (this.producer) {
-      this.producer.close();
-      this.producer = null;
-    }
+  getIsDeafened(): boolean {
+    return this.isDeafened;
+  }
 
-    for (const consumer of this.consumers.values()) {
-      consumer.close();
-    }
-    this.consumers.clear();
-
-    if (this.sendTransport) {
-      this.sendTransport.close();
-      this.sendTransport = null;
-    }
-
-    if (this.recvTransport) {
-      this.recvTransport.close();
-      this.recvTransport = null;
-    }
-
+  leaveChannel(): void {
     if (this.localStream) {
       this.localStream.getTracks().forEach((track) => track.stop());
       this.localStream = null;
     }
 
-    this.device = null;
-  }
+    this.peerConnections.forEach((pc) => pc.close());
+    this.peerConnections.clear();
+    this.remoteStreams.clear();
 
-  private emitWithAck(event: string, data: any): Promise<any> {
-    return new Promise((resolve, reject) => {
-      if (!this.socket) {
-        reject(new Error('Socket not connected'));
-        return;
-      }
-
-      this.socket.emit(event, data, (response: any) => {
-        resolve(response);
-      });
+    this.audioElements.forEach((audio) => {
+      audio.pause();
+      audio.srcObject = null;
     });
-  }
+    this.audioElements.clear();
 
-  destroy() {
-    this.leaveVoiceChannel();
     if (this.socket) {
-      this.socket.disconnect();
-      this.socket = null;
+      this.socket.emit('voice:leave');
     }
+
+    this.channelId = '';
   }
 }
 
