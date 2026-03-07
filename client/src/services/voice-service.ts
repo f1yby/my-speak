@@ -87,6 +87,11 @@ export class VoiceService {
       return false;
     }
 
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      this.onError?.('Microphone access is not available. Please ensure you are using HTTPS and have granted microphone permissions.');
+      return false;
+    }
+
     try {
       this.localStream = await navigator.mediaDevices.getUserMedia({
         audio: {
