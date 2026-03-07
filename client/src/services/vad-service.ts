@@ -37,7 +37,7 @@ export class VADService {
 
       this.analyser = this.audioContext.createAnalyser();
       this.analyser.fftSize = 256;
-      this.analyser.smoothingTimeConstant = this.options.smoothingTimeConstant;
+      this.analyser.smoothingTimeConstant = this.options.smoothingTimeConstant ?? 0.8;
 
       this.mediaStreamSource = this.audioContext.createMediaStreamSource(stream);
       this.mediaStreamSource.connect(this.analyser);

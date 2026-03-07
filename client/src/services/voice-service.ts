@@ -15,7 +15,7 @@ export class VoiceService {
   private peerConnections: Map<string, RTCPeerConnection> = new Map();
   private remoteStreams: Map<string, MediaStream> = new Map();
   private audioElements: Map<string, HTMLAudioElement> = new Map();
-  private channelId: string = '';
+  private _channelId: string = '';
   private isMuted: boolean = false;
   private isDeafened: boolean = false;
   private noiseSuppressionEnabled: boolean = true;
@@ -88,7 +88,7 @@ export class VoiceService {
       return false;
     }
 
-    this.channelId = channelId;
+    this._channelId = channelId;
 
     try {
       this.localStream = await navigator.mediaDevices.getUserMedia({
@@ -310,7 +310,7 @@ export class VoiceService {
       this.socket.emit('voice:leave');
     }
 
-    this.channelId = '';
+    this._channelId = '';
   }
 }
 

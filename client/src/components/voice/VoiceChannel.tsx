@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Mic, MicOff, Volume2, VolumeX, Phone, PhoneOff, Users, Waves } from 'lucide-react';
 import { voiceService, type VoiceParticipant } from '../../services/voice-service';
 
@@ -135,7 +135,7 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
           <span className="text-gray-300">You</span>
           {isMuted && <MicOff className="w-3 h-3 text-red-400" />}
           {isDeafened && <VolumeX className="w-3 h-3 text-red-400" />}
-          {noiseSuppressionEnabled && <Waves className="w-3 h-3 text-blue-400" title="Noise suppression" />}
+          {noiseSuppressionEnabled && <Waves className="w-3 h-3 text-blue-400" />}
         </div>
         
         {participants.map((participant) => (

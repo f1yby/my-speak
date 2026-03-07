@@ -80,7 +80,7 @@ export const MainLayout: React.FC = () => {
 
   const fetchMessages = async (chId: string) => {
     try {
-      const data = await messageApi.getMessages(chId, 50);
+      const data = await messageApi.getMessages(chId, { limit: 50 });
       setMessages(data);
     } catch (error) {
       console.error('Failed to fetch messages:', error);
