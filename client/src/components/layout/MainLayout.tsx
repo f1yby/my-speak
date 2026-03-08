@@ -5,7 +5,8 @@ import { channelApi, type Channel } from '../../services/channel-api';
 import { messageApi, type Message } from '../../services/message-api';
 import { io, Socket } from 'socket.io-client';
 import { VoiceChannel } from '../voice/VoiceChannel';
-import { Hash, Volume2 } from 'lucide-react';
+import { Hash, Volume2, Settings as SettingsIcon } from 'lucide-react';
+import { Settings } from '../settings/Settings';
 
 export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -22,15 +23,44 @@ export const MainLayout: React.FC = () => {
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelType, setNewChannelType] = useState<'TEXT' | 'VOICE'>('TEXT');
   const [voiceChannelId, setVoiceChannelId] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
 
   useEffect(() => {
     fetchChannels();
+    
+    const savedVoiceChannel = localStorage.getItem('activeVoiceChannel');
+    if (savedVoiceChannel) {
+      setVoiceChannelId(savedVoiceChannel);
+    }
     
     const token = localStorage.getItem('token');
     if (token) {
       const socketUrl = import.meta.env.VITE_SOCKET_URL || window.location.origin;
       const newSocket = io(socketUrl, {
         auth: { token },
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+      });
+      
+      newSocket.on('connect', () => {
+        setIsReconnecting(false);
+        if (currentChannel?.type === 'TEXT' && channelId) {
+          newSocket.emit('channel:join', channelId);
+        }
+      });
+      
+      newSocket.on('disconnect', () => {
+        setIsReconnecting(true);
+      });
+      
+      newSocket.on('reconnect', () => {
+        setIsReconnecting(false);
+        if (currentChannel?.type === 'TEXT' && channelId) {
+          newSocket.emit('channel:join', channelId);
+        }
       });
       
       newSocket.on('message:new', (message: Message) => {
@@ -90,8 +120,10 @@ export const MainLayout: React.FC = () => {
   const handleSelectChannel = (channel: Channel) => {
     if (channel.type === 'VOICE') {
       setVoiceChannelId(channel.id);
+      localStorage.setItem('activeVoiceChannel', channel.id);
     } else {
       setVoiceChannelId(null);
+      localStorage.removeItem('activeVoiceChannel');
     }
     navigate(`/channels/${channel.id}`);
   };
@@ -165,6 +197,12 @@ export const MainLayout: React.FC = () => {
 
   return (
     <div className="h-screen flex bg-gray-900 text-white overflow-hidden">
+      {/* Reconnecting Banner */}
+      {isReconnecting && (
+        <div className="fixed top-0 left-0 right-0 bg-yellow-600 text-white text-center py-1 text-sm z-50">
+          Reconnecting...
+        </div>
+      )}
       {/* Sidebar */}
       <div className="w-64 bg-gray-800 flex flex-col">
         {/* Header */}
@@ -255,19 +293,31 @@ export const MainLayout: React.FC = () => {
             channelId={voiceChannelId}
             channelName={voiceChannels.find(c => c.id === voiceChannelId)?.name || 'Voice'}
             socket={socket}
-            onLeave={() => setVoiceChannelId(null)}
+            onLeave={() => {
+              setVoiceChannelId(null);
+              localStorage.removeItem('activeVoiceChannel');
+            }}
+            autoJoin={true}
           />
         )}
         
         {/* User */}
         <div className="h-14 px-4 flex items-center justify-between border-t border-gray-700 bg-gray-800">
           <span className="text-sm text-gray-300">{user?.username}</span>
-          <button
-            onClick={handleLogout}
-            className="text-gray-400 hover:text-white text-sm"
-          >
-            Logout
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setShowSettings(true)}
+              className="text-gray-400 hover:text-white"
+            >
+              <SettingsIcon className="w-4 h-4" />
+            </button>
+            <button
+              onClick={handleLogout}
+              className="text-gray-400 hover:text-white text-sm"
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </div>
       
@@ -412,6 +462,11 @@ export const MainLayout: React.FC = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <Settings onClose={() => setShowSettings(false)} />
       )}
     </div>
   );

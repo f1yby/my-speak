@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Mic, MicOff, Volume2, VolumeX, Phone, PhoneOff, Users, Waves } from 'lucide-react';
 import { voiceService, type VoiceParticipant } from '../../services/voice-service';
 
@@ -7,6 +7,7 @@ interface VoiceChannelProps {
   channelName: string;
   socket: any;
   onLeave?: () => void;
+  autoJoin?: boolean;
 }
 
 export const VoiceChannel: React.FC<VoiceChannelProps> = ({
@@ -14,6 +15,7 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
   channelName,
   socket,
   onLeave,
+  autoJoin = false,
 }) => {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -22,6 +24,21 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
   const [noiseSuppressionEnabled, setNoiseSuppressionEnabled] = useState(true);
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const handleJoin = useCallback(async () => {
+    setIsConnecting(true);
+    setError(null);
+
+    const success = await voiceService.joinChannel(channelId);
+    
+    if (success) {
+      setIsConnected(true);
+      setIsMuted(false);
+      setIsDeafened(false);
+    }
+    
+    setIsConnecting(false);
+  }, [channelId]);
 
   useEffect(() => {
     voiceService.setSocket(socket);
@@ -50,25 +67,14 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
 
     voiceService.setupSocketHandlers();
 
+    if (autoJoin) {
+      handleJoin();
+    }
+
     return () => {
       voiceService.leaveChannel();
     };
-  }, [socket]);
-
-  const handleJoin = async () => {
-    setIsConnecting(true);
-    setError(null);
-
-    const success = await voiceService.joinChannel(channelId);
-    
-    if (success) {
-      setIsConnected(true);
-      setIsMuted(false);
-      setIsDeafened(false);
-    }
-    
-    setIsConnecting(false);
-  };
+  }, [socket, autoJoin, handleJoin]);
 
   const handleLeave = () => {
     voiceService.leaveChannel();

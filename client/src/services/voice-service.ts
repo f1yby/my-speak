@@ -93,13 +93,22 @@ export class VoiceService {
     }
 
     try {
+      const preferredDeviceId = localStorage.getItem('preferredMicrophone');
+      
+      const audioConstraints: MediaTrackConstraints = {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        sampleRate: 48000,
+        channelCount: 1,
+      };
+
+      if (preferredDeviceId) {
+        audioConstraints.deviceId = { exact: preferredDeviceId };
+      }
+
       this.localStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: 48000,
-        },
+        audio: audioConstraints,
         video: false,
       });
 
