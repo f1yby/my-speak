@@ -23,6 +23,7 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
   const [isDeafened, setIsDeafened] = useState(false);
   const [noiseSuppressionEnabled, setNoiseSuppressionEnabled] = useState(true);
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
+  const [participantVolumes, setParticipantVolumes] = useState<Map<string, number>>(new Map());
   const [error, setError] = useState<string | null>(null);
 
   const handleJoin = useCallback(async () => {
@@ -98,6 +99,28 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
     setNoiseSuppressionEnabled(enabled);
   };
 
+  const handleVolumeChange = (socketId: string, volume: number) => {
+    voiceService.setParticipantVolume(socketId, volume);
+    setParticipantVolumes((prev) => {
+      const next = new Map(prev);
+      next.set(socketId, volume);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    participants.forEach((p) => {
+      if (!participantVolumes.has(p.socketId)) {
+        const savedVolume = voiceService.getParticipantVolume(p.socketId);
+        setParticipantVolumes((prev) => {
+          const next = new Map(prev);
+          next.set(p.socketId, savedVolume);
+          return next;
+        });
+      }
+    });
+  }, [participants, participantVolumes]);
+
   if (!isConnected) {
     return (
       <div className="p-4 border-t border-gray-700">
@@ -144,16 +167,35 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
           {noiseSuppressionEnabled && <Waves className="w-3 h-3 text-blue-400" />}
         </div>
         
-        {participants.map((participant) => (
-          <div key={participant.socketId} className="flex items-center space-x-2 text-sm">
-            <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs">
-              {participant.username[0].toUpperCase()}
+        {participants.map((participant) => {
+          const volume = participantVolumes.get(participant.socketId) ?? 1;
+          const volumePercent = Math.round(volume * 100);
+          return (
+            <div key={participant.socketId} className="space-y-1">
+              <div className="flex items-center space-x-2 text-sm">
+                <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs flex-shrink-0">
+                  {participant.username[0].toUpperCase()}
+                </div>
+                <span className="text-gray-300 truncate">{participant.username}</span>
+                {participant.isMuted && <MicOff className="w-3 h-3 text-red-400 flex-shrink-0" />}
+                {participant.isDeafened && <VolumeX className="w-3 h-3 text-red-400 flex-shrink-0" />}
+              </div>
+              <div className="flex items-center space-x-2 pl-8">
+                <Volume2 className="w-3 h-3 text-gray-500 flex-shrink-0" />
+                <input
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                  value={volume}
+                  onChange={(e) => handleVolumeChange(participant.socketId, parseFloat(e.target.value))}
+                  className="flex-1 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                />
+                <span className="text-xs text-gray-500 w-8 text-right">{volumePercent}%</span>
+              </div>
             </div>
-            <span className="text-gray-300">{participant.username}</span>
-            {participant.isMuted && <MicOff className="w-3 h-3 text-red-400" />}
-            {participant.isDeafened && <VolumeX className="w-3 h-3 text-red-400" />}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="flex items-center justify-between">

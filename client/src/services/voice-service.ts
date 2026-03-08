@@ -15,6 +15,8 @@ export class VoiceService {
   private peerConnections: Map<string, RTCPeerConnection> = new Map();
   private remoteStreams: Map<string, MediaStream> = new Map();
   private audioElements: Map<string, HTMLAudioElement> = new Map();
+  private audioContext: AudioContext | null = null;
+  private participantGains: Map<string, GainNode> = new Map();
   private isMuted: boolean = false;
   private isDeafened: boolean = false;
   private noiseSuppressionEnabled: boolean = true;
@@ -129,6 +131,8 @@ export class VoiceService {
         });
       }
 
+      this.audioContext = new AudioContext({ sampleRate: 48000 });
+
       this.socket.emit('voice:join', channelId);
       return true;
     } catch (error) {
@@ -157,16 +161,20 @@ export class VoiceService {
       const [stream] = event.streams;
       this.remoteStreams.set(socketId, stream);
       
-      let audio = this.audioElements.get(socketId);
-      if (!audio) {
-        audio = new Audio();
-        audio.autoplay = true;
-        this.audioElements.set(socketId, audio);
-      }
-      audio.srcObject = stream;
-      
-      if (this.isDeafened) {
-        audio.muted = true;
+      if (this.audioContext && this.audioContext.state === 'running') {
+        this.setupAudioProcessing(socketId, stream);
+      } else {
+        let audio = this.audioElements.get(socketId);
+        if (!audio) {
+          audio = new Audio();
+          audio.autoplay = true;
+          this.audioElements.set(socketId, audio);
+        }
+        audio.srcObject = stream;
+        
+        if (this.isDeafened) {
+          audio.muted = true;
+        }
       }
     };
 
@@ -190,6 +198,37 @@ export class VoiceService {
     }
 
     return pc;
+  }
+
+  private setupAudioProcessing(socketId: string, stream: MediaStream): void {
+    if (!this.audioContext) return;
+
+    const source = this.audioContext.createMediaStreamSource(stream);
+    const gainNode = this.audioContext.createGain();
+    
+    const savedVolume = localStorage.getItem(`voice_volume_${socketId}`);
+    gainNode.gain.value = savedVolume ? parseFloat(savedVolume) : 1;
+    
+    this.participantGains.set(socketId, gainNode);
+    
+    source.connect(gainNode);
+    gainNode.connect(this.audioContext.destination);
+  }
+
+  setParticipantVolume(socketId: string, volume: number): void {
+    const gainNode = this.participantGains.get(socketId);
+    if (gainNode) {
+      gainNode.gain.value = volume;
+      localStorage.setItem(`voice_volume_${socketId}`, volume.toString());
+    }
+  }
+
+  getParticipantVolume(socketId: string): number {
+    const savedVolume = localStorage.getItem(`voice_volume_${socketId}`);
+    if (savedVolume) {
+      return parseFloat(savedVolume);
+    }
+    return 1;
   }
 
   private async createOffer(socketId: string): Promise<void> {
@@ -246,6 +285,12 @@ export class VoiceService {
     }
     
     this.remoteStreams.delete(socketId);
+    
+    const gainNode = this.participantGains.get(socketId);
+    if (gainNode) {
+      gainNode.disconnect();
+      this.participantGains.delete(socketId);
+    }
     
     const audio = this.audioElements.get(socketId);
     if (audio) {
@@ -316,6 +361,13 @@ export class VoiceService {
       audio.srcObject = null;
     });
     this.audioElements.clear();
+    
+    this.participantGains.clear();
+
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = null;
+    }
 
     if (this.socket) {
       this.socket.emit('voice:leave');
