@@ -340,9 +340,14 @@ export class VoiceService {
     const stream = new MediaStream([consumer.track]);
     this.remoteStreams.set(producerSocketId, stream);
 
+    console.log('[Voice] Audio track:', consumer.track);
+    console.log('[Voice] AudioContext state:', this.audioContext?.state);
+
     if (this.audioContext && this.audioContext.state === 'running') {
+      console.log('[Voice] Setting up audio processing for', producerSocketId);
       this.setupAudioProcessing(producerSocketId, stream);
     } else {
+      console.log('[Voice] Using Audio element for', producerSocketId);
       let audio = this.audioElements.get(producerSocketId);
       if (!audio) {
         audio = new Audio();
