@@ -71,13 +71,13 @@ export async function createTransport(channelId: string, socketId: string): Prom
       {
         protocol: 'udp',
         ip: '0.0.0.0',
-        announcedAddress: process.env.MEDIASOUP_ANNOUNCED_IP || undefined,
+        announcedAddress: process.env.MEDIASOUP_ANNOUNCED_ADDRESS || undefined,
         portRange: { min: 10000, max: 10100 },
       },
       {
         protocol: 'tcp',
         ip: '0.0.0.0',
-        announcedAddress: process.env.MEDIASOUP_ANNOUNCED_IP || undefined,
+        announcedAddress: process.env.MEDIASOUP_ANNOUNCED_ADDRESS || undefined,
         portRange: { min: 10000, max: 10100 },
       },
     ],

@@ -173,7 +173,7 @@ Message {
 生产环境需要配置公网 IP：
 
 ```env
-MEDIASOUP_ANNOUNCED_IP=your.public.ip.address
+MEDIASOUP_ANNOUNCED_ADDRESS=yourdomain.com
 ```
 
 ### 端口
