@@ -193,28 +193,28 @@ export class VoiceService {
   private async createSendTransport(channelId: string): Promise<void> {
     if (!this.socket || !this.device) return;
 
-    console.log('[Voice] Creating transport...');
+    console.log('[Voice] Creating send transport...');
     const transportParams = await new Promise<any>((resolve) => {
-      this.socket!.emit('voice:create-transport', channelId, resolve);
+      this.socket!.emit('voice:create-transport', { channelId, direction: 'send' }, resolve);
     });
 
-    console.log('[Voice] Transport params:', transportParams);
+    console.log('[Voice] Send transport params:', transportParams);
 
     if (transportParams.error) {
       throw new Error(transportParams.error);
     }
 
     this.sendTransport = this.device.createSendTransport({
-      id: transportParams.id?.toString() || `send-${Date.now()}`,
-      iceParameters: transportParams.iceParameters || {},
-      iceCandidates: transportParams.iceCandidates || [],
-      dtlsParameters: transportParams.dtlsParameters || {},
+      id: transportParams.id,
+      iceParameters: transportParams.iceParameters,
+      iceCandidates: transportParams.iceCandidates,
+      dtlsParameters: transportParams.dtlsParameters,
     });
 
     this.sendTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
       try {
         await new Promise<void>((resolve, reject) => {
-          this.socket!.emit('voice:connect-transport', { channelId, dtlsParameters }, (result: any) => {
+          this.socket!.emit('voice:connect-transport', { channelId, direction: 'send', dtlsParameters }, (result: any) => {
             if (result.error) reject(new Error(result.error));
             else resolve();
           });
@@ -244,25 +244,28 @@ export class VoiceService {
   private async createRecvTransport(channelId: string): Promise<void> {
     if (!this.socket || !this.device) return;
 
+    console.log('[Voice] Creating recv transport...');
     const transportParams = await new Promise<any>((resolve) => {
-      this.socket!.emit('voice:create-transport', channelId, resolve);
+      this.socket!.emit('voice:create-transport', { channelId, direction: 'recv' }, resolve);
     });
+
+    console.log('[Voice] Recv transport params:', transportParams);
 
     if (transportParams.error) {
       throw new Error(transportParams.error);
     }
 
     this.recvTransport = this.device.createRecvTransport({
-      id: transportParams.id?.toString() || `recv-${Date.now()}`,
-      iceParameters: transportParams.iceParameters || {},
-      iceCandidates: transportParams.iceCandidates || [],
-      dtlsParameters: transportParams.dtlsParameters || {},
+      id: transportParams.id,
+      iceParameters: transportParams.iceParameters,
+      iceCandidates: transportParams.iceCandidates,
+      dtlsParameters: transportParams.dtlsParameters,
     });
 
     this.recvTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
       try {
         await new Promise<void>((resolve, reject) => {
-          this.socket!.emit('voice:connect-transport', { channelId, dtlsParameters }, (result: any) => {
+          this.socket!.emit('voice:connect-transport', { channelId, direction: 'recv', dtlsParameters }, (result: any) => {
             if (result.error) reject(new Error(result.error));
             else resolve();
           });

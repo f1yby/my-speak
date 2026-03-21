@@ -161,9 +161,9 @@ io.on('connection', async (socket) => {
     callback(rtpCapabilities);
   });
 
-  socket.on('voice:create-transport', async (channelId: string, callback: Function) => {
+  socket.on('voice:create-transport', async (data: { channelId: string; direction: 'send' | 'recv' }, callback: Function) => {
     try {
-      const params = await mediasoupService.createTransport(channelId, socket.id);
+      const params = await mediasoupService.createTransport(data.channelId, socket.id, data.direction);
       callback(params);
     } catch (error) {
       console.error('Failed to create transport:', error);
@@ -173,10 +173,11 @@ io.on('connection', async (socket) => {
 
   socket.on('voice:connect-transport', async (data: { 
     channelId: string; 
+    direction: 'send' | 'recv';
     dtlsParameters: any 
   }, callback: Function) => {
     try {
-      await mediasoupService.connectTransport(data.channelId, socket.id, data.dtlsParameters);
+      await mediasoupService.connectTransport(data.channelId, socket.id, data.direction, data.dtlsParameters);
       callback({ success: true });
     } catch (error) {
       console.error('Failed to connect transport:', error);

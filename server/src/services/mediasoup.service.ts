@@ -64,7 +64,7 @@ export async function getOrCreateRouterRtpCapabilities(channelId: string): Promi
   return router.rtpCapabilities;
 }
 
-export async function createTransport(channelId: string, socketId: string): Promise<{
+export async function createTransport(channelId: string, socketId: string, direction: 'send' | 'recv'): Promise<{
   id: string;
   iceParameters: types.IceParameters;
   iceCandidates: types.IceCandidate[];
@@ -92,7 +92,7 @@ export async function createTransport(channelId: string, socketId: string): Prom
     preferUdp: true,
   });
 
-  const transportKey = `${channelId}:${socketId}`;
+  const transportKey = `${channelId}:${socketId}:${direction}`;
   transports.set(transportKey, transport);
 
   transport.on('dtlsstatechange', (dtlsState) => {
@@ -113,9 +113,10 @@ export async function createTransport(channelId: string, socketId: string): Prom
 export async function connectTransport(
   channelId: string,
   socketId: string,
+  direction: 'send' | 'recv',
   dtlsParameters: types.DtlsParameters
 ): Promise<void> {
-  const transportKey = `${channelId}:${socketId}`;
+  const transportKey = `${channelId}:${socketId}:${direction}`;
   const transport = transports.get(transportKey);
   if (!transport) {
     throw new Error('Transport not found');
@@ -129,7 +130,7 @@ export async function produce(
   kind: 'audio' | 'video',
   rtpParameters: types.RtpParameters
 ): Promise<{ producerId: string }> {
-  const transportKey = `${channelId}:${socketId}`;
+  const transportKey = `${channelId}:${socketId}:send`;
   const transport = transports.get(transportKey);
   if (!transport) {
     throw new Error('Transport not found');
@@ -163,7 +164,7 @@ export async function consume(
     throw new Error('Router not found');
   }
 
-  const transportKey = `${channelId}:${socketId}`;
+  const transportKey = `${channelId}:${socketId}:recv`;
   const transport = transports.get(transportKey);
   if (!transport) {
     throw new Error('Transport not found');
@@ -226,12 +227,21 @@ export function closeConsumer(channelId: string, socketId: string, producerSocke
 }
 
 export function closeTransport(channelId: string, socketId: string): void {
-  const transportKey = `${channelId}:${socketId}`;
-  const transport = transports.get(transportKey);
-  if (transport) {
-    transport.close();
-    transports.delete(transportKey);
+  const sendKey = `${channelId}:${socketId}:send`;
+  const recvKey = `${channelId}:${socketId}:recv`;
+  
+  const sendTransport = transports.get(sendKey);
+  if (sendTransport) {
+    sendTransport.close();
+    transports.delete(sendKey);
   }
+  
+  const recvTransport = transports.get(recvKey);
+  if (recvTransport) {
+    recvTransport.close();
+    transports.delete(recvKey);
+  }
+  
   closeProducer(channelId, socketId);
 
   for (const [key] of consumers) {
