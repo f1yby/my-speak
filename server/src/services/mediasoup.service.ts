@@ -1,4 +1,5 @@
-import mediasoup, { types } from 'mediasoup';
+import mediasoup = require('mediasoup');
+import { types } from 'mediasoup';
 
 let worker: types.Worker | null = null;
 const routers = new Map<string, types.Router>();
