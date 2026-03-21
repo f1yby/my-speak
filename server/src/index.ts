@@ -156,8 +156,8 @@ io.on('connection', async (socket) => {
   });
 
   // Mediasoup events
-  socket.on('voice:get-router-rtp-capabilities', (channelId: string, callback: Function) => {
-    const rtpCapabilities = mediasoupService.getRouterRtpCapabilities(channelId);
+  socket.on('voice:get-router-rtp-capabilities', async (channelId: string, callback: Function) => {
+    const rtpCapabilities = await mediasoupService.getOrCreateRouterRtpCapabilities(channelId);
     callback(rtpCapabilities);
   });
 

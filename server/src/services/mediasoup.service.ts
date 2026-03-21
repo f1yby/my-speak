@@ -59,6 +59,11 @@ export function getRouterRtpCapabilities(channelId: string): types.RtpCapabiliti
   return router?.rtpCapabilities || null;
 }
 
+export async function getOrCreateRouterRtpCapabilities(channelId: string): Promise<types.RtpCapabilities> {
+  const router = await getOrCreateRouter(channelId);
+  return router.rtpCapabilities;
+}
+
 export async function createTransport(channelId: string, socketId: string): Promise<{
   id: string;
   iceParameters: types.IceParameters;
