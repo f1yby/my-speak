@@ -7,7 +7,6 @@ export interface VoiceParticipant {
   username: string;
   isMuted: boolean;
   isDeafened: boolean;
-  producerId?: string;
 }
 
 export class VoiceService {
@@ -27,7 +26,6 @@ export class VoiceService {
   private isDeafened: boolean = false;
   private noiseSuppressionEnabled: boolean = true;
   private currentChannelId: string | null = null;
-  private pendingParticipants: VoiceParticipant[] = [];
 
   private onParticipantJoined?: (participant: VoiceParticipant) => void;
   private onParticipantLeft?: (socketId: string) => void;
@@ -57,7 +55,6 @@ export class VoiceService {
     if (!this.socket) return;
 
     this.socket.on('voice:participants', (participants: VoiceParticipant[]) => {
-      this.pendingParticipants = participants;
       participants.forEach((p) => {
         this.onParticipantJoined?.(p);
       });
