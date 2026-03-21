@@ -301,11 +301,12 @@ export class VoiceService {
       rtpParameters: result.rtpParameters,
     });
 
-    console.log('[Voice] Local consumer created, track:', consumer.track?.id, consumer.track?.readyState);
+    console.log('[Voice] Local consumer created, track:', consumer.track?.id, consumer.track?.readyState, consumer.track?.enabled, consumer.track?.muted);
 
     this.consumers.set(socketId, consumer);
 
     const stream = new MediaStream([consumer.track]);
+    console.log('[Voice] Stream tracks:', stream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, muted: t.muted, readyState: t.readyState })));
     
     const audio = new Audio();
     audio.srcObject = stream;

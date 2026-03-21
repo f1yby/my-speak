@@ -173,7 +173,7 @@ export async function consume(
   const consumer = await transport.consume({
     producerId,
     rtpCapabilities,
-    paused: true,
+    paused: false,
   });
 
   const consumerKey = `${transportId}:${producerId}`;
@@ -187,9 +187,7 @@ export async function consume(
     consumers.delete(consumerKey);
   });
 
-  await consumer.resume();
-
-  console.log(`Consumer created: ${consumer.id} for producer ${producerId}`);
+  console.log(`Consumer created: ${consumer.id} for producer ${producerId}, paused: ${consumer.paused}`);
 
   return {
     id: consumer.id,
