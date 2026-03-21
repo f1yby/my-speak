@@ -353,7 +353,6 @@ export class VoiceService {
   setParticipantVolume(_socketId: string, _volume: number): void {
     // Volume control not implemented with simple Audio elements
   }
-  }
 
   getParticipantVolume(socketId: string): number {
     const savedVolume = localStorage.getItem(`voice_volume_${socketId}`);
