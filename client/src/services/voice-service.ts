@@ -339,33 +339,6 @@ export class VoiceService {
     console.log('[Voice] Audio element created for', socketId);
   }
 
-    const consumer = await this.recvTransport.consume({
-      id: result.id,
-      producerId: result.producerId,
-      kind: result.kind,
-      rtpParameters: result.rtpParameters,
-    });
-
-    this.consumers.set(socketId, consumer);
-
-    const stream = new MediaStream([consumer.track]);
-    console.log('[Voice] Consumer track:', consumer.track?.kind, consumer.track?.enabled, consumer.track?.readyState);
-
-    const audio = new Audio();
-    audio.srcObject = stream;
-    audio.autoplay = true;
-    audio.volume = 1.0;
-    
-    audio.play().catch(e => {
-      console.error('[Voice] Audio play failed:', e);
-    });
-    
-    this.audioElements.set(socketId, audio);
-    console.log('[Voice] Audio element created for', socketId);
-
-    console.log('[Voice] Consumer created for', socketId);
-  }
-
   private setupAudioProcessing(socketId: string, stream: MediaStream): void {
     if (!this.audioContext) return;
 
