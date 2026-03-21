@@ -153,7 +153,6 @@ export class VoiceService {
       }
 
       this.audioContext = new AudioContext({ sampleRate: 48000 });
-      this.currentChannelId = channelId;
 
       this.socket.emit('voice:join', channelId);
       
@@ -464,7 +463,6 @@ export class VoiceService {
       this.socket.emit('voice:leave');
     }
 
-    this.currentChannelId = null;
     this.device = null;
   }
 }
