@@ -3,7 +3,8 @@ set -e
 
 echo "🚀 Starting deployment..."
 
-cd /opt/my-speak
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 echo "📦 Building frontend..."
 docker-compose -f docker-compose.prod.yml build frontend
