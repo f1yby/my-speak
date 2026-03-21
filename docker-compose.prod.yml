@@ -9,6 +9,9 @@ services:
     env_file: .env
     volumes:
       - sqlite_data:/app/data
+    ports:
+      - "3001:3001"
+      - "10000-10100:10000-10100/udp"
     networks:
       - myspeak_network
 

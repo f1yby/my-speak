@@ -10,6 +10,7 @@ import channelRoutes from './api/routes/channel.routes';
 import messageRoutes from './api/routes/message.routes';
 import * as authService from './services/auth.service';
 import * as messageService from './services/message.service';
+import * as mediasoupService from './services/mediasoup.service';
 import prisma from './db/prisma-client';
 
 dotenv.config();
@@ -110,10 +111,10 @@ io.on('connection', async (socket) => {
     io.to(`channel:${data.channelId}`).emit('message:new', message);
   });
 
-  // Voice channel events
-  socket.on('voice:join', (channelId: string) => {
+  // Voice channel events - Mediasoup SFU
+  socket.on('voice:join', async (channelId: string) => {
     if (currentVoiceChannelId) {
-      leaveVoiceChannel(socket, currentVoiceChannelId);
+      await leaveVoiceChannel(socket, currentVoiceChannelId);
     }
     
     currentVoiceChannelId = channelId;
@@ -147,18 +148,90 @@ io.on('connection', async (socket) => {
     console.log(`User ${username} joined voice channel ${channelId}`);
   });
 
-  socket.on('voice:leave', () => {
+  socket.on('voice:leave', async () => {
     if (currentVoiceChannelId) {
-      leaveVoiceChannel(socket, currentVoiceChannelId);
+      await leaveVoiceChannel(socket, currentVoiceChannelId);
       currentVoiceChannelId = null;
     }
   });
 
-  socket.on('voice:signal', (data: { to: string; signal: any }) => {
-    io.to(data.to).emit('voice:signal', {
-      from: socket.id,
-      signal: data.signal,
-    });
+  // Mediasoup events
+  socket.on('voice:get-router-rtp-capabilities', (channelId: string, callback: Function) => {
+    const rtpCapabilities = mediasoupService.getRouterRtpCapabilities(channelId);
+    callback(rtpCapabilities);
+  });
+
+  socket.on('voice:create-transport', async (channelId: string, callback: Function) => {
+    try {
+      const params = await mediasoupService.createTransport(channelId, socket.id);
+      callback(params);
+    } catch (error) {
+      console.error('Failed to create transport:', error);
+      callback({ error: 'Failed to create transport' });
+    }
+  });
+
+  socket.on('voice:connect-transport', async (data: { 
+    channelId: string; 
+    dtlsParameters: any 
+  }, callback: Function) => {
+    try {
+      await mediasoupService.connectTransport(data.channelId, socket.id, data.dtlsParameters);
+      callback({ success: true });
+    } catch (error) {
+      console.error('Failed to connect transport:', error);
+      callback({ error: 'Failed to connect transport' });
+    }
+  });
+
+  socket.on('voice:produce', async (data: {
+    channelId: string;
+    kind: 'audio' | 'video';
+    rtpParameters: any;
+  }, callback: Function) => {
+    try {
+      const { producerId } = await mediasoupService.produce(
+        data.channelId, 
+        socket.id, 
+        data.kind, 
+        data.rtpParameters
+      );
+      
+      socket.to(`voice:${data.channelId}`).emit('voice:new-producer', {
+        producerId,
+        socketId: socket.id,
+        username,
+      });
+      
+      callback({ producerId });
+    } catch (error) {
+      console.error('Failed to produce:', error);
+      callback({ error: 'Failed to produce' });
+    }
+  });
+
+  socket.on('voice:consume', async (data: {
+    channelId: string;
+    producerSocketId: string;
+    rtpCapabilities: any;
+  }, callback: Function) => {
+    try {
+      const result = await mediasoupService.consume(
+        data.channelId,
+        socket.id,
+        data.producerSocketId,
+        data.rtpCapabilities
+      );
+      callback(result);
+    } catch (error) {
+      console.error('Failed to consume:', error);
+      callback({ error: 'Failed to consume' });
+    }
+  });
+
+  socket.on('voice:close-producer', (channelId: string) => {
+    mediasoupService.closeProducer(channelId, socket.id);
+    socket.to(`voice:${channelId}`).emit('voice:producer-closed', { socketId: socket.id });
   });
 
   socket.on('voice:mute', (isMuted: boolean) => {
@@ -193,22 +266,25 @@ io.on('connection', async (socket) => {
     }
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     console.log(`User disconnected: ${username} (${socket.id})`);
     
     if (currentVoiceChannelId) {
-      leaveVoiceChannel(socket, currentVoiceChannelId);
+      await leaveVoiceChannel(socket, currentVoiceChannelId);
     }
   });
 
-  function leaveVoiceChannel(sock: Socket, channelId: string) {
+  async function leaveVoiceChannel(sock: Socket, channelId: string) {
     sock.leave(`voice:${channelId}`);
+    
+    mediasoupService.closeTransport(channelId, sock.id);
     
     const participants = voiceChannels.get(channelId);
     if (participants) {
       participants.delete(sock.id);
       if (participants.size === 0) {
         voiceChannels.delete(channelId);
+        mediasoupService.closeRouter(channelId);
       }
     }
     
@@ -225,6 +301,9 @@ async function startServer() {
   try {
     await prisma.$connect();
     console.log('📦 Database connected');
+    
+    await mediasoupService.initWorker();
+    console.log('🎬 Mediasoup worker initialized');
     
     httpServer.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);

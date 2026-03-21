@@ -7,6 +7,7 @@ services:
     restart: unless-stopped
     ports:
       - "3001:3001"
+      - "10000-10100:10000-10100/udp"
     volumes:
       - ./server:/app
       - /app/node_modules

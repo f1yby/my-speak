@@ -25,5 +25,6 @@ RUN npm prune --production
 RUN mkdir -p /app/data
 
 EXPOSE 3001
+EXPOSE 10000-10100/udp
 
 CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/index.js"]

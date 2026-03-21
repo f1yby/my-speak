@@ -141,12 +141,47 @@ Message {
 | `channel:join` | `{ channelId }` | 加入频道 |
 | `channel:leave` | - | 离开频道 |
 | `message:send` | `{ channelId, content }` | 发送消息 |
+| `voice:join` | `channelId` | 加入语音频道 |
+| `voice:leave` | - | 离开语音频道 |
+| `voice:get-router-rtp-capabilities` | `channelId` | 获取路由 RTP 能力 |
+| `voice:create-transport` | `channelId` | 创建 WebRTC 传输通道 |
+| `voice:connect-transport` | `{ channelId, dtlsParameters }` | 连接传输通道 |
+| `voice:produce` | `{ channelId, kind, rtpParameters }` | 发送音频流 |
+| `voice:consume` | `{ channelId, producerSocketId, rtpCapabilities }` | 接收音频流 |
+| `voice:mute` | `isMuted` | 静音/取消静音 |
+| `voice:deafen` | `isDeafened` | 耳聋/取消耳聋 |
 
 ### 服务端 → 客户端
 | 事件 | 数据 | 说明 |
 |------|------|------|
 | `channel:messages` | `Message[]` | 频道历史消息 |
 | `message:new` | `Message` | 新消息广播 |
+
+## 语音通话
+
+本项目使用 **Mediasoup SFU** 实现中心化语音转发，所有音频流经服务器转发。
+
+### 架构
+
+```
+客户端A → 服务器(SFU) → 客户端B
+                        ↘ 客户端C
+```
+
+### 配置
+
+生产环境需要配置公网 IP：
+
+```env
+MEDIASOUP_ANNOUNCED_IP=your.public.ip.address
+```
+
+### 端口
+
+- `3001` - HTTP/WebSocket
+- `10000-10100/udp` - WebRTC 媒体传输
+
+---
 
 ## 开发命令
 
@@ -189,7 +224,7 @@ docker-compose down
 | 历史消息保存 | ✅ 已实现 | PostgreSQL 持久化 |
 | 消息实时显示 | ✅ 已实现 | Socket.io 广播 |
 | | | |
-| 语音通话 | ❌ 未实现 | 已移除 mediasoup |
+| 语音通话 | ✅ 已实现 | Mediasoup SFU 中心化转发 |
 | 用户头像 | ❌ 未实现 | 无用户账号系统 |
 | 私聊 | ❌ 未实现 | 只有公开频道 |
 | 消息编辑/删除 | ❌ 未实现 | 发送后不可修改 |

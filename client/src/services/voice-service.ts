@@ -1,4 +1,5 @@
 import { Socket } from 'socket.io-client';
+import { Device, types } from 'mediasoup-client';
 import { noiseSuppressionService } from './noise-suppression';
 
 export interface VoiceParticipant {
@@ -12,7 +13,11 @@ export class VoiceService {
   private socket: Socket | null = null;
   private localStream: MediaStream | null = null;
   private processedStream: MediaStream | null = null;
-  private peerConnections: Map<string, RTCPeerConnection> = new Map();
+  private device: Device | null = null;
+  private sendTransport: types.Transport | null = null;
+  private recvTransport: types.Transport | null = null;
+  private producer: types.Producer | null = null;
+  private consumers: Map<string, types.Consumer> = new Map();
   private remoteStreams: Map<string, MediaStream> = new Map();
   private audioElements: Map<string, HTMLAudioElement> = new Map();
   private audioContext: AudioContext | null = null;
@@ -20,11 +25,7 @@ export class VoiceService {
   private isMuted: boolean = false;
   private isDeafened: boolean = false;
   private noiseSuppressionEnabled: boolean = true;
-  
-  private readonly ICE_SERVERS = [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ];
+  private currentChannelId: string | null = null;
 
   private onParticipantJoined?: (participant: VoiceParticipant) => void;
   private onParticipantLeft?: (socketId: string) => void;
@@ -56,17 +57,15 @@ export class VoiceService {
     this.socket.on('voice:participants', (participants: VoiceParticipant[]) => {
       participants.forEach((p) => {
         this.onParticipantJoined?.(p);
-        this.createPeerConnection(p.socketId, true);
       });
     });
 
     this.socket.on('voice:user-joined', (participant: VoiceParticipant) => {
       this.onParticipantJoined?.(participant);
-      this.createPeerConnection(participant.socketId, false);
     });
 
     this.socket.on('voice:user-left', ({ socketId }: { socketId: string }) => {
-      this.closePeerConnection(socketId);
+      this.closeConsumer(socketId);
       this.onParticipantLeft?.(socketId);
     });
 
@@ -78,8 +77,13 @@ export class VoiceService {
       this.onParticipantDeafened?.(socketId, isDeafened);
     });
 
-    this.socket.on('voice:signal', async ({ from, signal }: { from: string; signal: any }) => {
-      await this.handleSignal(from, signal);
+    this.socket.on('voice:new-producer', async (data: { producerId: string; socketId: string; username: string }) => {
+      if (this.isDeafened) return;
+      await this.consume(data.socketId, data.producerId);
+    });
+
+    this.socket.on('voice:producer-closed', ({ socketId }: { socketId: string }) => {
+      this.closeConsumer(socketId);
     });
   }
 
@@ -132,8 +136,15 @@ export class VoiceService {
       }
 
       this.audioContext = new AudioContext({ sampleRate: 48000 });
+      this.currentChannelId = channelId;
 
       this.socket.emit('voice:join', channelId);
+
+      await this.initDevice(channelId);
+      await this.createSendTransport(channelId);
+      await this.createRecvTransport(channelId);
+      await this.produce();
+
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to get microphone access';
@@ -142,62 +153,171 @@ export class VoiceService {
     }
   }
 
-  private createPeerConnection(socketId: string, isInitiator: boolean): RTCPeerConnection {
-    if (this.peerConnections.has(socketId)) {
-      return this.peerConnections.get(socketId)!;
-    }
+  private async initDevice(channelId: string): Promise<void> {
+    if (!this.socket) return;
 
-    const pc = new RTCPeerConnection({ iceServers: this.ICE_SERVERS });
-    this.peerConnections.set(socketId, pc);
+    this.device = new Device();
 
-    const streamToSend = this.processedStream || this.localStream;
-    if (streamToSend) {
-      streamToSend.getTracks().forEach((track) => {
-        pc.addTrack(track, streamToSend!);
+    const rtpCapabilities = await new Promise<any>((resolve) => {
+      this.socket!.emit('voice:get-router-rtp-capabilities', channelId, resolve);
+    });
+
+    if (!rtpCapabilities) {
+      await this.device.load({
+        routerRtpCapabilities: {
+          codecs: [{
+            kind: 'audio',
+            mimeType: 'audio/opus',
+            clockRate: 48000,
+            channels: 2,
+            parameters: { useinbandfec: 1, usedtx: 1, stereo: 1 },
+          }],
+          headerExtensions: [],
+        },
       });
+    } else {
+      await this.device.load({ routerRtpCapabilities: rtpCapabilities });
+    }
+  }
+
+  private async createSendTransport(channelId: string): Promise<void> {
+    if (!this.socket || !this.device) return;
+
+    const transportParams = await new Promise<any>((resolve) => {
+      this.socket!.emit('voice:create-transport', channelId, resolve);
+    });
+
+    if (transportParams.error) {
+      throw new Error(transportParams.error);
     }
 
-    pc.ontrack = (event) => {
-      const [stream] = event.streams;
-      this.remoteStreams.set(socketId, stream);
-      
-      if (this.audioContext && this.audioContext.state === 'running') {
-        this.setupAudioProcessing(socketId, stream);
-      } else {
-        let audio = this.audioElements.get(socketId);
-        if (!audio) {
-          audio = new Audio();
-          audio.autoplay = true;
-          this.audioElements.set(socketId, audio);
-        }
-        audio.srcObject = stream;
-        
-        if (this.isDeafened) {
-          audio.muted = true;
-        }
-      }
-    };
+    this.sendTransport = this.device.createSendTransport({
+      id: transportParams.id?.toString() || `send-${Date.now()}`,
+      iceParameters: transportParams.iceParameters || {},
+      iceCandidates: transportParams.iceCandidates || [],
+      dtlsParameters: transportParams.dtlsParameters || {},
+    });
 
-    pc.onicecandidate = (event) => {
-      if (event.candidate && this.socket) {
-        this.socket.emit('voice:signal', {
-          to: socketId,
-          signal: { type: 'ice', candidate: event.candidate },
+    this.sendTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          this.socket!.emit('voice:connect-transport', { channelId, dtlsParameters }, (result: any) => {
+            if (result.error) reject(new Error(result.error));
+            else resolve();
+          });
         });
+        callback();
+      } catch (error) {
+        errback(error as Error);
       }
-    };
+    });
 
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-        this.closePeerConnection(socketId);
+    this.sendTransport.on('produce', async ({ kind, rtpParameters }, callback, errback) => {
+      try {
+        const result = await new Promise<any>((resolve) => {
+          this.socket!.emit('voice:produce', { channelId, kind, rtpParameters }, resolve);
+        });
+        if (result.error) {
+          errback(new Error(result.error));
+        } else {
+          callback({ id: result.producerId });
+        }
+      } catch (error) {
+        errback(error as Error);
       }
-    };
+    });
+  }
 
-    if (isInitiator) {
-      this.createOffer(socketId);
+  private async createRecvTransport(channelId: string): Promise<void> {
+    if (!this.socket || !this.device) return;
+
+    const transportParams = await new Promise<any>((resolve) => {
+      this.socket!.emit('voice:create-transport', channelId, resolve);
+    });
+
+    if (transportParams.error) {
+      throw new Error(transportParams.error);
     }
 
-    return pc;
+    this.recvTransport = this.device.createRecvTransport({
+      id: transportParams.id?.toString() || `recv-${Date.now()}`,
+      iceParameters: transportParams.iceParameters || {},
+      iceCandidates: transportParams.iceCandidates || [],
+      dtlsParameters: transportParams.dtlsParameters || {},
+    });
+
+    this.recvTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          this.socket!.emit('voice:connect-transport', { channelId, dtlsParameters }, (result: any) => {
+            if (result.error) reject(new Error(result.error));
+            else resolve();
+          });
+        });
+        callback();
+      } catch (error) {
+        errback(error as Error);
+      }
+    });
+  }
+
+  private async produce(): Promise<void> {
+    if (!this.sendTransport || !this.processedStream) return;
+
+    const track = this.processedStream.getAudioTracks()[0];
+    if (!track) return;
+
+    this.producer = await this.sendTransport.produce({
+      track,
+      codecOptions: {
+        opusStereo: true,
+        opusDtx: true,
+      },
+    });
+  }
+
+  private async consume(producerSocketId: string, producerId: string): Promise<void> {
+    if (!this.socket || !this.recvTransport || !this.device) return;
+
+    const consumerParams = await new Promise<any>((resolve) => {
+      this.socket!.emit('voice:consume', {
+        channelId: this.currentChannelId,
+        producerSocketId,
+        rtpCapabilities: this.device!.rtpCapabilities,
+      }, resolve);
+    });
+
+    if (!consumerParams || consumerParams.error) {
+      return;
+    }
+
+    const consumer = await this.recvTransport.consume({
+      id: consumerParams.consumerId,
+      producerId: consumerParams.producerId,
+      kind: consumerParams.kind,
+      rtpParameters: consumerParams.rtpParameters,
+    });
+
+    this.consumers.set(producerSocketId, consumer);
+
+    const stream = new MediaStream([consumer.track]);
+    this.remoteStreams.set(producerSocketId, stream);
+
+    if (this.audioContext && this.audioContext.state === 'running') {
+      this.setupAudioProcessing(producerSocketId, stream);
+    } else {
+      let audio = this.audioElements.get(producerSocketId);
+      if (!audio) {
+        audio = new Audio();
+        audio.autoplay = true;
+        this.audioElements.set(producerSocketId, audio);
+      }
+      audio.srcObject = stream;
+
+      if (this.isDeafened) {
+        audio.muted = true;
+      }
+    }
   }
 
   private setupAudioProcessing(socketId: string, stream: MediaStream): void {
@@ -215,6 +335,29 @@ export class VoiceService {
     gainNode.connect(this.audioContext.destination);
   }
 
+  private closeConsumer(socketId: string): void {
+    const consumer = this.consumers.get(socketId);
+    if (consumer) {
+      consumer.close();
+      this.consumers.delete(socketId);
+    }
+
+    this.remoteStreams.delete(socketId);
+
+    const gainNode = this.participantGains.get(socketId);
+    if (gainNode) {
+      gainNode.disconnect();
+      this.participantGains.delete(socketId);
+    }
+
+    const audio = this.audioElements.get(socketId);
+    if (audio) {
+      audio.pause();
+      audio.srcObject = null;
+      this.audioElements.delete(socketId);
+    }
+  }
+
   setParticipantVolume(socketId: string, volume: number): void {
     const gainNode = this.participantGains.get(socketId);
     if (gainNode) {
@@ -229,75 +372,6 @@ export class VoiceService {
       return parseFloat(savedVolume);
     }
     return 1;
-  }
-
-  private async createOffer(socketId: string): Promise<void> {
-    const pc = this.peerConnections.get(socketId);
-    if (!pc || !this.socket) return;
-
-    try {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      
-      this.socket.emit('voice:signal', {
-        to: socketId,
-        signal: { type: 'offer', sdp: offer },
-      });
-    } catch (error) {
-      console.error('Failed to create offer:', error);
-    }
-  }
-
-  private async handleSignal(from: string, signal: any): Promise<void> {
-    if (!this.socket) return;
-
-    let pc = this.peerConnections.get(from);
-    
-    if (!pc) {
-      pc = this.createPeerConnection(from, false);
-    }
-
-    try {
-      if (signal.type === 'offer') {
-        await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        
-        this.socket.emit('voice:signal', {
-          to: from,
-          signal: { type: 'answer', sdp: answer },
-        });
-      } else if (signal.type === 'answer') {
-        await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-      } else if (signal.type === 'ice') {
-        await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
-      }
-    } catch (error) {
-      console.error('Failed to handle signal:', error);
-    }
-  }
-
-  private closePeerConnection(socketId: string): void {
-    const pc = this.peerConnections.get(socketId);
-    if (pc) {
-      pc.close();
-      this.peerConnections.delete(socketId);
-    }
-    
-    this.remoteStreams.delete(socketId);
-    
-    const gainNode = this.participantGains.get(socketId);
-    if (gainNode) {
-      gainNode.disconnect();
-      this.participantGains.delete(socketId);
-    }
-    
-    const audio = this.audioElements.get(socketId);
-    if (audio) {
-      audio.pause();
-      audio.srcObject = null;
-      this.audioElements.delete(socketId);
-    }
   }
 
   toggleMute(): boolean {
@@ -319,6 +393,10 @@ export class VoiceService {
     
     this.audioElements.forEach((audio) => {
       audio.muted = this.isDeafened;
+    });
+
+    this.participantGains.forEach((gainNode) => {
+      gainNode.gain.value = this.isDeafened ? 0 : 1;
     });
     
     this.socket?.emit('voice:deafen', this.isDeafened);
@@ -352,9 +430,24 @@ export class VoiceService {
     noiseSuppressionService.destroy();
     this.processedStream = null;
 
-    this.peerConnections.forEach((pc) => pc.close());
-    this.peerConnections.clear();
+    if (this.producer) {
+      this.producer.close();
+      this.producer = null;
+    }
+
+    this.consumers.forEach((consumer) => consumer.close());
+    this.consumers.clear();
     this.remoteStreams.clear();
+
+    if (this.sendTransport) {
+      this.sendTransport.close();
+      this.sendTransport = null;
+    }
+
+    if (this.recvTransport) {
+      this.recvTransport.close();
+      this.recvTransport = null;
+    }
 
     this.audioElements.forEach((audio) => {
       audio.pause();
@@ -372,6 +465,8 @@ export class VoiceService {
     if (this.socket) {
       this.socket.emit('voice:leave');
     }
+
+    this.currentChannelId = null;
   }
 }
 

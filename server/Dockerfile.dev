@@ -22,6 +22,7 @@ RUN mkdir -p /app/data
 
 # Expose port
 EXPOSE 3001
+EXPOSE 10000-10100/udp
 
 # Start command
 CMD ["npm", "run", "dev"]
