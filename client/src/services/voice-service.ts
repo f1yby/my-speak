@@ -238,14 +238,17 @@ export class VoiceService {
 
     this.recvTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
       try {
+        console.log('[Voice] recvTransport connect event');
         await new Promise<void>((resolve, reject) => {
           this.socket!.emit('voice:connect-transport', { transportId: recvParams.id, dtlsParameters }, (result: any) => {
             if (result.error) reject(new Error(result.error));
             else resolve();
           });
         });
+        console.log('[Voice] recvTransport connected');
         callback();
       } catch (error) {
+        console.error('[Voice] recvTransport connect error:', error);
         errback(error as Error);
       }
     });
@@ -278,6 +281,8 @@ export class VoiceService {
   private async consume(producerId: string, socketId: string): Promise<void> {
     if (!this.socket || !this.recvTransport || !this.device) return;
 
+    console.log('[Voice] Requesting to consume producer:', producerId);
+    
     const result = await new Promise<any>((resolve) => {
       this.socket!.emit('voice:consume', {
         producerId,
@@ -291,6 +296,49 @@ export class VoiceService {
       return;
     }
 
+    console.log('[Voice] Server consumer created:', result.id);
+
+    const consumer = await this.recvTransport.consume({
+      id: result.id,
+      producerId: result.producerId,
+      kind: result.kind,
+      rtpParameters: result.rtpParameters,
+    });
+
+    console.log('[Voice] Local consumer created, track:', consumer.track?.id, consumer.track?.readyState);
+
+    this.consumers.set(socketId, consumer);
+
+    const stream = new MediaStream([consumer.track]);
+    
+    const audio = new Audio();
+    audio.srcObject = stream;
+    audio.autoplay = true;
+    audio.volume = 1.0;
+    
+    audio.onloadedmetadata = () => {
+      console.log('[Voice] Audio metadata loaded for', socketId);
+    };
+    
+    audio.onplay = () => {
+      console.log('[Voice] Audio playing for', socketId);
+    };
+    
+    audio.onerror = (e) => {
+      console.error('[Voice] Audio error:', e);
+    };
+    
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => console.log('[Voice] Audio play() succeeded for', socketId))
+        .catch(e => console.error('[Voice] Audio play() failed:', e));
+    }
+    
+    this.audioElements.set(socketId, audio);
+    console.log('[Voice] Audio element created for', socketId);
+  }
+
     const consumer = await this.recvTransport.consume({
       id: result.id,
       producerId: result.producerId,
@@ -301,21 +349,19 @@ export class VoiceService {
     this.consumers.set(socketId, consumer);
 
     const stream = new MediaStream([consumer.track]);
+    console.log('[Voice] Consumer track:', consumer.track?.kind, consumer.track?.enabled, consumer.track?.readyState);
 
-    if (this.audioContext && this.audioContext.state === 'running') {
-      this.setupAudioProcessing(socketId, stream);
-    } else {
-      let audio = this.audioElements.get(socketId);
-      if (!audio) {
-        audio = new Audio();
-        audio.autoplay = true;
-        this.audioElements.set(socketId, audio);
-      }
-      audio.srcObject = stream;
-      if (this.isDeafened) {
-        audio.muted = true;
-      }
-    }
+    const audio = new Audio();
+    audio.srcObject = stream;
+    audio.autoplay = true;
+    audio.volume = 1.0;
+    
+    audio.play().catch(e => {
+      console.error('[Voice] Audio play failed:', e);
+    });
+    
+    this.audioElements.set(socketId, audio);
+    console.log('[Voice] Audio element created for', socketId);
 
     console.log('[Voice] Consumer created for', socketId);
   }
