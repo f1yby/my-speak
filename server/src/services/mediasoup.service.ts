@@ -200,6 +200,8 @@ export async function consume(
 
   await consumer.resume();
 
+  console.log(`Consumer created for ${socketId} consuming from ${producerSocketId}`);
+
   return {
     consumerId: consumer.id,
     producerId: producer.id,

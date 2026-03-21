@@ -7,6 +7,7 @@ export interface VoiceParticipant {
   username: string;
   isMuted: boolean;
   isDeafened: boolean;
+  producerId?: string;
 }
 
 export class VoiceService {
@@ -26,6 +27,7 @@ export class VoiceService {
   private isDeafened: boolean = false;
   private noiseSuppressionEnabled: boolean = true;
   private currentChannelId: string | null = null;
+  private pendingParticipants: VoiceParticipant[] = [];
 
   private onParticipantJoined?: (participant: VoiceParticipant) => void;
   private onParticipantLeft?: (socketId: string) => void;
@@ -55,6 +57,7 @@ export class VoiceService {
     if (!this.socket) return;
 
     this.socket.on('voice:participants', (participants: VoiceParticipant[]) => {
+      this.pendingParticipants = participants;
       participants.forEach((p) => {
         this.onParticipantJoined?.(p);
       });
@@ -149,6 +152,8 @@ export class VoiceService {
       console.log('[Voice] Producing audio...');
       await this.produce();
       console.log('[Voice] Ready!');
+
+      await this.consumeExistingProducers();
 
       return true;
     } catch (error) {
@@ -292,9 +297,25 @@ export class VoiceService {
     });
   }
 
+  private async consumeExistingProducers(): Promise<void> {
+    if (this.isDeafened || !this.socket || !this.currentChannelId) return;
+
+    console.log('[Voice] Getting existing producers...');
+    const producers = await new Promise<Array<{ socketId: string; producerId: string; username: string }>>((resolve) => {
+      this.socket!.emit('voice:get-producers', this.currentChannelId, resolve);
+    });
+
+    console.log('[Voice] Found producers:', producers);
+
+    for (const p of producers) {
+      await this.consume(p.socketId, p.producerId);
+    }
+  }
+
   private async consume(producerSocketId: string, _producerId: string): Promise<void> {
     if (!this.socket || !this.recvTransport || !this.device) return;
 
+    console.log('[Voice] Consuming from', producerSocketId);
     const consumerParams = await new Promise<any>((resolve) => {
       this.socket!.emit('voice:consume', {
         channelId: this.currentChannelId,
@@ -303,7 +324,10 @@ export class VoiceService {
       }, resolve);
     });
 
+    console.log('[Voice] Consumer params:', consumerParams);
+
     if (!consumerParams || consumerParams.error) {
+      console.error('[Voice] Failed to consume:', consumerParams?.error);
       return;
     }
 

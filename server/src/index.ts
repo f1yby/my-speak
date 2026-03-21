@@ -52,9 +52,11 @@ interface VoiceParticipant {
   username: string;
   isMuted: boolean;
   isDeafened: boolean;
+  producerId?: string;
 }
 
 const voiceChannels = new Map<string, Map<string, VoiceParticipant>>();
+const producerMap = new Map<string, string>();
 
 io.use(async (socket, next) => {
   const token = socket.handshake.auth.token;
@@ -198,6 +200,16 @@ io.on('connection', async (socket) => {
         data.rtpParameters
       );
       
+      producerMap.set(socket.id, producerId);
+      
+      const participants = voiceChannels.get(data.channelId);
+      if (participants) {
+        const participant = participants.get(socket.id);
+        if (participant) {
+          participant.producerId = producerId;
+        }
+      }
+      
       socket.to(`voice:${data.channelId}`).emit('voice:new-producer', {
         producerId,
         socketId: socket.id,
@@ -232,7 +244,26 @@ io.on('connection', async (socket) => {
 
   socket.on('voice:close-producer', (channelId: string) => {
     mediasoupService.closeProducer(channelId, socket.id);
+    producerMap.delete(socket.id);
     socket.to(`voice:${channelId}`).emit('voice:producer-closed', { socketId: socket.id });
+  });
+
+  socket.on('voice:get-producers', (channelId: string, callback: Function) => {
+    const producers: { socketId: string; producerId: string; username: string }[] = [];
+    const participants = voiceChannels.get(channelId);
+    if (participants) {
+      for (const [socketId, participant] of participants) {
+        const producerId = producerMap.get(socketId);
+        if (producerId && socketId !== socket.id) {
+          producers.push({
+            socketId,
+            producerId,
+            username: participant.username,
+          });
+        }
+      }
+    }
+    callback(producers);
   });
 
   socket.on('voice:mute', (isMuted: boolean) => {
@@ -279,6 +310,7 @@ io.on('connection', async (socket) => {
     sock.leave(`voice:${channelId}`);
     
     mediasoupService.closeTransport(channelId, sock.id);
+    producerMap.delete(sock.id);
     
     const participants = voiceChannels.get(channelId);
     if (participants) {
