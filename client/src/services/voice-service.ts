@@ -177,6 +177,7 @@ export class VoiceService {
           codecs: [{
             kind: 'audio',
             mimeType: 'audio/opus',
+            preferredPayloadType: 100,
             clockRate: 48000,
             channels: 2,
             parameters: { useinbandfec: 1, usedtx: 1, stereo: 1 },
@@ -288,7 +289,7 @@ export class VoiceService {
     });
   }
 
-  private async consume(producerSocketId: string, producerId: string): Promise<void> {
+  private async consume(producerSocketId: string, _producerId: string): Promise<void> {
     if (!this.socket || !this.recvTransport || !this.device) return;
 
     const consumerParams = await new Promise<any>((resolve) => {
