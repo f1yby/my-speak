@@ -47,16 +47,15 @@ app.use('/api/auth', authRoutes);
 app.use('/api/channels', channelRoutes);
 app.use('/api/channels/:channelId/messages', messageRoutes);
 
-interface VoiceParticipant {
+interface VoiceUser {
   socketId: string;
   username: string;
-  isMuted: boolean;
-  isDeafened: boolean;
+  sendTransportId?: string;
+  recvTransportId?: string;
   producerId?: string;
 }
 
-const voiceChannels = new Map<string, Map<string, VoiceParticipant>>();
-const producerMap = new Map<string, string>();
+const voiceChannels = new Map<string, Map<string, VoiceUser>>();
 
 io.use(async (socket, next) => {
   const token = socket.handshake.auth.token;
@@ -113,7 +112,6 @@ io.on('connection', async (socket) => {
     io.to(`channel:${data.channelId}`).emit('message:new', message);
   });
 
-  // Voice channel events - Mediasoup SFU
   socket.on('voice:join', async (channelId: string) => {
     if (currentVoiceChannelId) {
       await leaveVoiceChannel(socket, currentVoiceChannelId);
@@ -126,25 +124,27 @@ io.on('connection', async (socket) => {
       voiceChannels.set(channelId, new Map());
     }
     
-    const participants = voiceChannels.get(channelId)!;
-    participants.set(socket.id, {
+    const users = voiceChannels.get(channelId)!;
+    users.set(socket.id, {
       socketId: socket.id,
       username,
-      isMuted: false,
-      isDeafened: false,
     });
+
+    const rtpCapabilities = mediasoupService.getRouterRtpCapabilities(channelId);
     
-    const existingParticipants = Array.from(participants.values()).filter(
-      (p) => p.socketId !== socket.id
-    );
+    const existingUsers = Array.from(users.values())
+      .filter(u => u.socketId !== socket.id && u.producerId)
+      .map(u => ({
+        socketId: u.socketId,
+        username: u.username,
+        producerId: u.producerId!,
+      }));
     
-    socket.emit('voice:participants', existingParticipants);
+    socket.emit('voice:joined', { rtpCapabilities, users: existingUsers });
     
     socket.to(`voice:${channelId}`).emit('voice:user-joined', {
       socketId: socket.id,
       username,
-      isMuted: false,
-      isDeafened: false,
     });
     
     console.log(`User ${username} joined voice channel ${channelId}`);
@@ -157,15 +157,9 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // Mediasoup events
-  socket.on('voice:get-router-rtp-capabilities', async (channelId: string, callback: Function) => {
-    const rtpCapabilities = await mediasoupService.getOrCreateRouterRtpCapabilities(channelId);
-    callback(rtpCapabilities);
-  });
-
-  socket.on('voice:create-transport', async (data: { channelId: string; direction: 'send' | 'recv' }, callback: Function) => {
+  socket.on('voice:create-transport', async (callback: Function) => {
     try {
-      const params = await mediasoupService.createTransport(data.channelId, socket.id, data.direction);
+      const params = await mediasoupService.createWebRtcTransport(currentVoiceChannelId!);
       callback(params);
     } catch (error) {
       console.error('Failed to create transport:', error);
@@ -173,13 +167,9 @@ io.on('connection', async (socket) => {
     }
   });
 
-  socket.on('voice:connect-transport', async (data: { 
-    channelId: string; 
-    direction: 'send' | 'recv';
-    dtlsParameters: any 
-  }, callback: Function) => {
+  socket.on('voice:connect-transport', async (data: { transportId: string; dtlsParameters: any }, callback: Function) => {
     try {
-      await mediasoupService.connectTransport(data.channelId, socket.id, data.direction, data.dtlsParameters);
+      await mediasoupService.connectTransport(data.transportId, data.dtlsParameters);
       callback({ success: true });
     } catch (error) {
       console.error('Failed to connect transport:', error);
@@ -187,52 +177,57 @@ io.on('connection', async (socket) => {
     }
   });
 
-  socket.on('voice:produce', async (data: {
-    channelId: string;
-    kind: 'audio' | 'video';
-    rtpParameters: any;
-  }, callback: Function) => {
-    try {
-      const { producerId } = await mediasoupService.produce(
-        data.channelId, 
-        socket.id, 
-        data.kind, 
-        data.rtpParameters
-      );
-      
-      producerMap.set(socket.id, producerId);
-      
-      const participants = voiceChannels.get(data.channelId);
-      if (participants) {
-        const participant = participants.get(socket.id);
-        if (participant) {
-          participant.producerId = producerId;
+  socket.on('voice:set-transport', (data: { sendTransportId?: string; recvTransportId?: string }) => {
+    if (currentVoiceChannelId) {
+      const users = voiceChannels.get(currentVoiceChannelId);
+      if (users) {
+        const user = users.get(socket.id);
+        if (user) {
+          if (data.sendTransportId) user.sendTransportId = data.sendTransportId;
+          if (data.recvTransportId) user.recvTransportId = data.recvTransportId;
         }
       }
-      
-      socket.to(`voice:${data.channelId}`).emit('voice:new-producer', {
-        producerId,
+    }
+  });
+
+  socket.on('voice:produce', async (data: { transportId: string; kind: 'audio' | 'video'; rtpParameters: any }, callback: Function) => {
+    try {
+      const result = await mediasoupService.produce(
+        currentVoiceChannelId!,
+        data.transportId,
+        data.kind,
+        data.rtpParameters
+      );
+
+      if (currentVoiceChannelId) {
+        const users = voiceChannels.get(currentVoiceChannelId);
+        if (users) {
+          const user = users.get(socket.id);
+          if (user) {
+            user.producerId = result.producerId;
+          }
+        }
+      }
+
+      socket.to(`voice:${currentVoiceChannelId}`).emit('voice:new-producer', {
+        producerId: result.producerId,
         socketId: socket.id,
         username,
       });
-      
-      callback({ producerId });
+
+      callback(result);
     } catch (error) {
       console.error('Failed to produce:', error);
       callback({ error: 'Failed to produce' });
     }
   });
 
-  socket.on('voice:consume', async (data: {
-    channelId: string;
-    producerSocketId: string;
-    rtpCapabilities: any;
-  }, callback: Function) => {
+  socket.on('voice:consume', async (data: { producerId: string; transportId: string; rtpCapabilities: any }, callback: Function) => {
     try {
       const result = await mediasoupService.consume(
-        data.channelId,
-        socket.id,
-        data.producerSocketId,
+        currentVoiceChannelId!,
+        data.producerId,
+        data.transportId,
         data.rtpCapabilities
       );
       callback(result);
@@ -242,59 +237,21 @@ io.on('connection', async (socket) => {
     }
   });
 
-  socket.on('voice:close-producer', (channelId: string) => {
-    mediasoupService.closeProducer(channelId, socket.id);
-    producerMap.delete(socket.id);
-    socket.to(`voice:${channelId}`).emit('voice:producer-closed', { socketId: socket.id });
-  });
-
-  socket.on('voice:get-producers', (channelId: string, callback: Function) => {
-    const producers: { socketId: string; producerId: string; username: string }[] = [];
-    const participants = voiceChannels.get(channelId);
-    if (participants) {
-      for (const [socketId, participant] of participants) {
-        const producerId = producerMap.get(socketId);
-        if (producerId && socketId !== socket.id) {
-          producers.push({
-            socketId,
-            producerId,
-            username: participant.username,
-          });
-        }
-      }
-    }
-    callback(producers);
-  });
-
   socket.on('voice:mute', (isMuted: boolean) => {
     if (currentVoiceChannelId) {
-      const participants = voiceChannels.get(currentVoiceChannelId);
-      if (participants) {
-        const participant = participants.get(socket.id);
-        if (participant) {
-          participant.isMuted = isMuted;
-          socket.to(`voice:${currentVoiceChannelId}`).emit('voice:user-muted', {
-            socketId: socket.id,
-            isMuted,
-          });
-        }
-      }
+      socket.to(`voice:${currentVoiceChannelId}`).emit('voice:user-muted', {
+        socketId: socket.id,
+        isMuted,
+      });
     }
   });
 
   socket.on('voice:deafen', (isDeafened: boolean) => {
     if (currentVoiceChannelId) {
-      const participants = voiceChannels.get(currentVoiceChannelId);
-      if (participants) {
-        const participant = participants.get(socket.id);
-        if (participant) {
-          participant.isDeafened = isDeafened;
-          socket.to(`voice:${currentVoiceChannelId}`).emit('voice:user-deafened', {
-            socketId: socket.id,
-            isDeafened,
-          });
-        }
-      }
+      socket.to(`voice:${currentVoiceChannelId}`).emit('voice:user-deafened', {
+        socketId: socket.id,
+        isDeafened,
+      });
     }
   });
 
@@ -309,13 +266,22 @@ io.on('connection', async (socket) => {
   async function leaveVoiceChannel(sock: Socket, channelId: string) {
     sock.leave(`voice:${channelId}`);
     
-    mediasoupService.closeTransport(channelId, sock.id);
-    producerMap.delete(sock.id);
-    
-    const participants = voiceChannels.get(channelId);
-    if (participants) {
-      participants.delete(sock.id);
-      if (participants.size === 0) {
+    const users = voiceChannels.get(channelId);
+    if (users) {
+      const user = users.get(sock.id);
+      if (user) {
+        if (user.sendTransportId) {
+          mediasoupService.closeTransport(user.sendTransportId);
+        }
+        if (user.recvTransportId) {
+          mediasoupService.closeTransport(user.recvTransportId);
+        }
+        if (user.producerId) {
+          mediasoupService.closeProducer(channelId, user.producerId);
+        }
+      }
+      users.delete(sock.id);
+      if (users.size === 0) {
         voiceChannels.delete(channelId);
         mediasoupService.closeRouter(channelId);
       }

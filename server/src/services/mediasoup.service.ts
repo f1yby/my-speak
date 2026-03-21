@@ -11,14 +11,8 @@ const mediaCodecs: types.RtpCodecCapability[] = [
   {
     kind: 'audio',
     mimeType: 'audio/opus',
-    preferredPayloadType: 100,
     clockRate: 48000,
     channels: 2,
-    parameters: {
-      useinbandfec: 1,
-      usedtx: 1,
-      stereo: 1,
-    },
   },
 ];
 
@@ -59,12 +53,7 @@ export function getRouterRtpCapabilities(channelId: string): types.RtpCapabiliti
   return router?.rtpCapabilities || null;
 }
 
-export async function getOrCreateRouterRtpCapabilities(channelId: string): Promise<types.RtpCapabilities> {
-  const router = await getOrCreateRouter(channelId);
-  return router.rtpCapabilities;
-}
-
-export async function createTransport(channelId: string, socketId: string, direction: 'send' | 'recv'): Promise<{
+export async function createWebRtcTransport(channelId: string): Promise<{
   id: string;
   iceParameters: types.IceParameters;
   iceCandidates: types.IceCandidate[];
@@ -92,15 +81,16 @@ export async function createTransport(channelId: string, socketId: string, direc
     preferUdp: true,
   });
 
-  const transportKey = `${channelId}:${socketId}:${direction}`;
-  transports.set(transportKey, transport);
+  transports.set(transport.id, transport);
 
   transport.on('dtlsstatechange', (dtlsState) => {
     if (dtlsState === 'closed') {
       transport.close();
-      transports.delete(transportKey);
+      transports.delete(transport.id);
     }
   });
+
+  console.log(`Transport created: ${transport.id}`);
 
   return {
     id: transport.id,
@@ -111,50 +101,48 @@ export async function createTransport(channelId: string, socketId: string, direc
 }
 
 export async function connectTransport(
-  channelId: string,
-  socketId: string,
-  direction: 'send' | 'recv',
+  transportId: string,
   dtlsParameters: types.DtlsParameters
 ): Promise<void> {
-  const transportKey = `${channelId}:${socketId}:${direction}`;
-  const transport = transports.get(transportKey);
+  const transport = transports.get(transportId);
   if (!transport) {
     throw new Error('Transport not found');
   }
   await transport.connect({ dtlsParameters });
+  console.log(`Transport connected: ${transportId}`);
 }
 
 export async function produce(
   channelId: string,
-  socketId: string,
+  transportId: string,
   kind: 'audio' | 'video',
   rtpParameters: types.RtpParameters
 ): Promise<{ producerId: string }> {
-  const transportKey = `${channelId}:${socketId}:send`;
-  const transport = transports.get(transportKey);
+  const transport = transports.get(transportId);
   if (!transport) {
     throw new Error('Transport not found');
   }
 
   const producer = await transport.produce({ kind, rtpParameters });
-  const producerKey = `${channelId}:${socketId}`;
+  
+  const producerKey = `${channelId}:${producer.id}`;
   producers.set(producerKey, producer);
 
   producer.on('transportclose', () => {
     producers.delete(producerKey);
   });
 
-  console.log(`Producer created for ${socketId} in channel ${channelId}`);
+  console.log(`Producer created: ${producer.id} in channel ${channelId}`);
   return { producerId: producer.id };
 }
 
 export async function consume(
   channelId: string,
-  socketId: string,
-  producerSocketId: string,
+  producerId: string,
+  transportId: string,
   rtpCapabilities: types.RtpCapabilities
 ): Promise<{
-  consumerId: string;
+  id: string;
   producerId: string;
   kind: string;
   rtpParameters: types.RtpParameters;
@@ -164,30 +152,30 @@ export async function consume(
     throw new Error('Router not found');
   }
 
-  const transportKey = `${channelId}:${socketId}:recv`;
-  const transport = transports.get(transportKey);
+  const transport = transports.get(transportId);
   if (!transport) {
     throw new Error('Transport not found');
   }
 
-  const producerKey = `${channelId}:${producerSocketId}`;
+  const producerKey = `${channelId}:${producerId}`;
   const producer = producers.get(producerKey);
   if (!producer) {
+    console.log(`Producer not found: ${producerId}`);
     return null;
   }
 
-  if (!router.canConsume({ producerId: producer.id, rtpCapabilities })) {
+  if (!router.canConsume({ producerId, rtpCapabilities })) {
     console.warn('Cannot consume');
     return null;
   }
 
   const consumer = await transport.consume({
-    producerId: producer.id,
+    producerId,
     rtpCapabilities,
     paused: true,
   });
 
-  const consumerKey = `${channelId}:${socketId}:${producerSocketId}`;
+  const consumerKey = `${transportId}:${producerId}`;
   consumers.set(consumerKey, consumer);
 
   consumer.on('transportclose', () => {
@@ -200,18 +188,27 @@ export async function consume(
 
   await consumer.resume();
 
-  console.log(`Consumer created for ${socketId} consuming from ${producerSocketId}`);
+  console.log(`Consumer created: ${consumer.id} for producer ${producerId}`);
 
   return {
-    consumerId: consumer.id,
+    id: consumer.id,
     producerId: producer.id,
     kind: consumer.kind,
     rtpParameters: consumer.rtpParameters,
   };
 }
 
-export function closeProducer(channelId: string, socketId: string): void {
-  const producerKey = `${channelId}:${socketId}`;
+export function getProducer(producerId: string): types.Producer | undefined {
+  for (const [, producer] of producers) {
+    if (producer.id === producerId) {
+      return producer;
+    }
+  }
+  return undefined;
+}
+
+export function closeProducer(channelId: string, producerId: string): void {
+  const producerKey = `${channelId}:${producerId}`;
   const producer = producers.get(producerKey);
   if (producer) {
     producer.close();
@@ -219,40 +216,17 @@ export function closeProducer(channelId: string, socketId: string): void {
   }
 }
 
-export function closeConsumer(channelId: string, socketId: string, producerSocketId: string): void {
-  const consumerKey = `${channelId}:${socketId}:${producerSocketId}`;
-  const consumer = consumers.get(consumerKey);
-  if (consumer) {
-    consumer.close();
-    consumers.delete(consumerKey);
+export function closeTransport(transportId: string): void {
+  const transport = transports.get(transportId);
+  if (transport) {
+    transport.close();
+    transports.delete(transportId);
   }
-}
 
-export function closeTransport(channelId: string, socketId: string): void {
-  const sendKey = `${channelId}:${socketId}:send`;
-  const recvKey = `${channelId}:${socketId}:recv`;
-  
-  const sendTransport = transports.get(sendKey);
-  if (sendTransport) {
-    sendTransport.close();
-    transports.delete(sendKey);
-  }
-  
-  const recvTransport = transports.get(recvKey);
-  if (recvTransport) {
-    recvTransport.close();
-    transports.delete(recvKey);
-  }
-  
-  closeProducer(channelId, socketId);
-
-  for (const [key] of consumers) {
-    if (key.startsWith(`${channelId}:${socketId}:`) || key.endsWith(`:${socketId}`)) {
-      const consumer = consumers.get(key);
-      if (consumer) {
-        consumer.close();
-        consumers.delete(key);
-      }
+  for (const [key, consumer] of consumers) {
+    if (key.startsWith(`${transportId}:`)) {
+      consumer.close();
+      consumers.delete(key);
     }
   }
 }
@@ -262,27 +236,5 @@ export function closeRouter(channelId: string): void {
   if (router) {
     router.close();
     routers.delete(channelId);
-  }
-
-  for (const [key] of transports) {
-    if (key.startsWith(`${channelId}:`)) {
-      const transport = transports.get(key);
-      if (transport) {
-        transport.close();
-        transports.delete(key);
-      }
-    }
-  }
-
-  for (const [key] of producers) {
-    if (key.startsWith(`${channelId}:`)) {
-      producers.delete(key);
-    }
-  }
-
-  for (const [key] of consumers) {
-    if (key.startsWith(`${channelId}:`)) {
-      consumers.delete(key);
-    }
   }
 }

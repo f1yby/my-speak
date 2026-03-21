@@ -18,7 +18,6 @@ export class VoiceService {
   private recvTransport: types.Transport | null = null;
   private producer: types.Producer | null = null;
   private consumers: Map<string, types.Consumer> = new Map();
-  private remoteStreams: Map<string, MediaStream> = new Map();
   private audioElements: Map<string, HTMLAudioElement> = new Map();
   private audioContext: AudioContext | null = null;
   private participantGains: Map<string, GainNode> = new Map();
@@ -54,10 +53,27 @@ export class VoiceService {
   setupSocketHandlers(): void {
     if (!this.socket) return;
 
-    this.socket.on('voice:participants', (participants: VoiceParticipant[]) => {
-      participants.forEach((p) => {
-        this.onParticipantJoined?.(p);
-      });
+    this.socket.on('voice:joined', async (data: { rtpCapabilities: any; users: Array<{ socketId: string; username: string; producerId: string }> }) => {
+      console.log('[Voice] Joined, RTP capabilities received');
+      
+      try {
+        await this.initDevice(data.rtpCapabilities);
+        await this.createTransports();
+        await this.produce();
+
+        for (const user of data.users) {
+          this.onParticipantJoined?.({
+            socketId: user.socketId,
+            username: user.username,
+            isMuted: false,
+            isDeafened: false,
+          });
+          await this.consume(user.producerId, user.socketId);
+        }
+      } catch (error) {
+        console.error('[Voice] Failed to initialize:', error);
+        this.onError?.(error instanceof Error ? error.message : 'Failed to initialize voice');
+      }
     });
 
     this.socket.on('voice:user-joined', (participant: VoiceParticipant) => {
@@ -79,11 +95,13 @@ export class VoiceService {
 
     this.socket.on('voice:new-producer', async (data: { producerId: string; socketId: string; username: string }) => {
       if (this.isDeafened) return;
-      await this.consume(data.socketId, data.producerId);
-    });
-
-    this.socket.on('voice:producer-closed', ({ socketId }: { socketId: string }) => {
-      this.closeConsumer(socketId);
+      this.onParticipantJoined?.({
+        socketId: data.socketId,
+        username: data.username,
+        isMuted: false,
+        isDeafened: false,
+      });
+      await this.consume(data.producerId, data.socketId);
     });
   }
 
@@ -94,7 +112,7 @@ export class VoiceService {
     }
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      this.onError?.('Microphone access is not available. Please ensure you are using HTTPS and have granted microphone permissions.');
+      this.onError?.('Microphone access is not available');
       return false;
     }
 
@@ -122,7 +140,7 @@ export class VoiceService {
         try {
           this.processedStream = await noiseSuppressionService.processStream(this.localStream);
         } catch (error) {
-          console.warn('Failed to apply noise suppression, using original stream:', error);
+          console.warn('Failed to apply noise suppression:', error);
           this.processedStream = this.localStream;
         }
       } else {
@@ -139,84 +157,47 @@ export class VoiceService {
       this.currentChannelId = channelId;
 
       this.socket.emit('voice:join', channelId);
-
-      console.log('[Voice] Initializing device...');
-      await this.initDevice(channelId);
-      console.log('[Voice] Creating send transport...');
-      await this.createSendTransport(channelId);
-      console.log('[Voice] Creating recv transport...');
-      await this.createRecvTransport(channelId);
-      console.log('[Voice] Producing audio...');
-      await this.produce();
-      console.log('[Voice] Ready!');
-
-      await this.consumeExistingProducers();
-
+      
       return true;
     } catch (error) {
-      console.error('[Voice] Error:', error);
       const message = error instanceof Error ? error.message : 'Failed to get microphone access';
       this.onError?.(message);
       return false;
     }
   }
 
-  private async initDevice(channelId: string): Promise<void> {
-    if (!this.socket) return;
-
-    this.device = new Device();
-
-    console.log('[Voice] Getting router RTP capabilities...');
-    const rtpCapabilities = await new Promise<any>((resolve) => {
-      this.socket!.emit('voice:get-router-rtp-capabilities', channelId, resolve);
-    });
-
-    console.log('[Voice] RTP capabilities:', rtpCapabilities);
-
+  private async initDevice(rtpCapabilities: any): Promise<void> {
     if (!rtpCapabilities) {
-      await this.device.load({
-        routerRtpCapabilities: {
-          codecs: [{
-            kind: 'audio',
-            mimeType: 'audio/opus',
-            preferredPayloadType: 100,
-            clockRate: 48000,
-            channels: 2,
-            parameters: { useinbandfec: 1, usedtx: 1, stereo: 1 },
-          }],
-          headerExtensions: [],
-        },
-      });
-    } else {
-      await this.device.load({ routerRtpCapabilities: rtpCapabilities });
+      throw new Error('No RTP capabilities received');
     }
+    
+    this.device = new Device();
+    await this.device.load({ routerRtpCapabilities: rtpCapabilities });
+    console.log('[Voice] Device loaded');
   }
 
-  private async createSendTransport(channelId: string): Promise<void> {
-    if (!this.socket || !this.device) return;
+  private async createTransports(): Promise<void> {
+    if (!this.device || !this.socket) return;
 
-    console.log('[Voice] Creating send transport...');
-    const transportParams = await new Promise<any>((resolve) => {
-      this.socket!.emit('voice:create-transport', { channelId, direction: 'send' }, resolve);
+    const sendParams = await new Promise<any>((resolve) => {
+      this.socket!.emit('voice:create-transport', resolve);
     });
 
-    console.log('[Voice] Send transport params:', transportParams);
-
-    if (transportParams.error) {
-      throw new Error(transportParams.error);
+    if (sendParams.error) {
+      throw new Error(sendParams.error);
     }
 
     this.sendTransport = this.device.createSendTransport({
-      id: transportParams.id,
-      iceParameters: transportParams.iceParameters,
-      iceCandidates: transportParams.iceCandidates,
-      dtlsParameters: transportParams.dtlsParameters,
+      id: sendParams.id,
+      iceParameters: sendParams.iceParameters,
+      iceCandidates: sendParams.iceCandidates,
+      dtlsParameters: sendParams.dtlsParameters,
     });
 
     this.sendTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
       try {
         await new Promise<void>((resolve, reject) => {
-          this.socket!.emit('voice:connect-transport', { channelId, direction: 'send', dtlsParameters }, (result: any) => {
+          this.socket!.emit('voice:connect-transport', { transportId: sendParams.id, dtlsParameters }, (result: any) => {
             if (result.error) reject(new Error(result.error));
             else resolve();
           });
@@ -230,7 +211,7 @@ export class VoiceService {
     this.sendTransport.on('produce', async ({ kind, rtpParameters }, callback, errback) => {
       try {
         const result = await new Promise<any>((resolve) => {
-          this.socket!.emit('voice:produce', { channelId, kind, rtpParameters }, resolve);
+          this.socket!.emit('voice:produce', { transportId: sendParams.id, kind, rtpParameters }, resolve);
         });
         if (result.error) {
           errback(new Error(result.error));
@@ -241,33 +222,26 @@ export class VoiceService {
         errback(error as Error);
       }
     });
-  }
 
-  private async createRecvTransport(channelId: string): Promise<void> {
-    if (!this.socket || !this.device) return;
-
-    console.log('[Voice] Creating recv transport...');
-    const transportParams = await new Promise<any>((resolve) => {
-      this.socket!.emit('voice:create-transport', { channelId, direction: 'recv' }, resolve);
+    const recvParams = await new Promise<any>((resolve) => {
+      this.socket!.emit('voice:create-transport', resolve);
     });
 
-    console.log('[Voice] Recv transport params:', transportParams);
-
-    if (transportParams.error) {
-      throw new Error(transportParams.error);
+    if (recvParams.error) {
+      throw new Error(recvParams.error);
     }
 
     this.recvTransport = this.device.createRecvTransport({
-      id: transportParams.id,
-      iceParameters: transportParams.iceParameters,
-      iceCandidates: transportParams.iceCandidates,
-      dtlsParameters: transportParams.dtlsParameters,
+      id: recvParams.id,
+      iceParameters: recvParams.iceParameters,
+      iceCandidates: recvParams.iceCandidates,
+      dtlsParameters: recvParams.dtlsParameters,
     });
 
     this.recvTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
       try {
         await new Promise<void>((resolve, reject) => {
-          this.socket!.emit('voice:connect-transport', { channelId, direction: 'recv', dtlsParameters }, (result: any) => {
+          this.socket!.emit('voice:connect-transport', { transportId: recvParams.id, dtlsParameters }, (result: any) => {
             if (result.error) reject(new Error(result.error));
             else resolve();
           });
@@ -277,6 +251,13 @@ export class VoiceService {
         errback(error as Error);
       }
     });
+
+    this.socket!.emit('voice:set-transport', {
+      sendTransportId: sendParams.id,
+      recvTransportId: recvParams.id,
+    });
+
+    console.log('[Voice] Transports created');
   }
 
   private async produce(): Promise<void> {
@@ -292,74 +273,53 @@ export class VoiceService {
         opusDtx: true,
       },
     });
+
+    console.log('[Voice] Producer created:', this.producer.id);
   }
 
-  private async consumeExistingProducers(): Promise<void> {
-    if (this.isDeafened || !this.socket || !this.currentChannelId) return;
-
-    console.log('[Voice] Getting existing producers...');
-    const producers = await new Promise<Array<{ socketId: string; producerId: string; username: string }>>((resolve) => {
-      this.socket!.emit('voice:get-producers', this.currentChannelId, resolve);
-    });
-
-    console.log('[Voice] Found producers:', producers);
-
-    for (const p of producers) {
-      await this.consume(p.socketId, p.producerId);
-    }
-  }
-
-  private async consume(producerSocketId: string, _producerId: string): Promise<void> {
+  private async consume(producerId: string, socketId: string): Promise<void> {
     if (!this.socket || !this.recvTransport || !this.device) return;
 
-    console.log('[Voice] Consuming from', producerSocketId);
-    const consumerParams = await new Promise<any>((resolve) => {
+    const result = await new Promise<any>((resolve) => {
       this.socket!.emit('voice:consume', {
-        channelId: this.currentChannelId,
-        producerSocketId,
+        producerId,
+        transportId: this.recvTransport!.id,
         rtpCapabilities: this.device!.rtpCapabilities,
       }, resolve);
     });
 
-    console.log('[Voice] Consumer params:', consumerParams);
-
-    if (!consumerParams || consumerParams.error) {
-      console.error('[Voice] Failed to consume:', consumerParams?.error);
+    if (!result || result.error) {
+      console.error('[Voice] Failed to consume:', result?.error);
       return;
     }
 
     const consumer = await this.recvTransport.consume({
-      id: consumerParams.consumerId,
-      producerId: consumerParams.producerId,
-      kind: consumerParams.kind,
-      rtpParameters: consumerParams.rtpParameters,
+      id: result.id,
+      producerId: result.producerId,
+      kind: result.kind,
+      rtpParameters: result.rtpParameters,
     });
 
-    this.consumers.set(producerSocketId, consumer);
+    this.consumers.set(socketId, consumer);
 
     const stream = new MediaStream([consumer.track]);
-    this.remoteStreams.set(producerSocketId, stream);
-
-    console.log('[Voice] Audio track:', consumer.track);
-    console.log('[Voice] AudioContext state:', this.audioContext?.state);
 
     if (this.audioContext && this.audioContext.state === 'running') {
-      console.log('[Voice] Setting up audio processing for', producerSocketId);
-      this.setupAudioProcessing(producerSocketId, stream);
+      this.setupAudioProcessing(socketId, stream);
     } else {
-      console.log('[Voice] Using Audio element for', producerSocketId);
-      let audio = this.audioElements.get(producerSocketId);
+      let audio = this.audioElements.get(socketId);
       if (!audio) {
         audio = new Audio();
         audio.autoplay = true;
-        this.audioElements.set(producerSocketId, audio);
+        this.audioElements.set(socketId, audio);
       }
       audio.srcObject = stream;
-
       if (this.isDeafened) {
         audio.muted = true;
       }
     }
+
+    console.log('[Voice] Consumer created for', socketId);
   }
 
   private setupAudioProcessing(socketId: string, stream: MediaStream): void {
@@ -383,8 +343,6 @@ export class VoiceService {
       consumer.close();
       this.consumers.delete(socketId);
     }
-
-    this.remoteStreams.delete(socketId);
 
     const gainNode = this.participantGains.get(socketId);
     if (gainNode) {
@@ -479,7 +437,6 @@ export class VoiceService {
 
     this.consumers.forEach((consumer) => consumer.close());
     this.consumers.clear();
-    this.remoteStreams.clear();
 
     if (this.sendTransport) {
       this.sendTransport.close();
@@ -509,6 +466,7 @@ export class VoiceService {
     }
 
     this.currentChannelId = null;
+    this.device = null;
   }
 }
 
