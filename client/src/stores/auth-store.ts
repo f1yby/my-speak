@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { authApi, type User, type LoginInput, type SetupInput } from '../services/auth-api';
 
 interface AuthState {
@@ -8,7 +8,7 @@ interface AuthState {
   isAuthenticated: boolean;
   isSetup: boolean | null;
   isLoading: boolean;
-  isHydrated: boolean;
+  _hydrated: boolean;
   error: string | null;
   
   checkSetup: () => Promise<void>;
@@ -16,18 +16,18 @@ interface AuthState {
   login: (input: LoginInput) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
-  setHydrated: () => void;
+  setHydrated: (state: boolean) => void;
 }
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       user: null,
       token: null,
       isAuthenticated: false,
       isSetup: null,
       isLoading: false,
-      isHydrated: false,
+      _hydrated: false,
       error: null,
 
       checkSetup: async () => {
@@ -95,19 +95,21 @@ export const useAuthStore = create<AuthState>()(
         set({ error: null });
       },
 
-      setHydrated: () => {
-        if (!get().isHydrated) {
-          set({ isHydrated: true });
-        }
+      setHydrated: (state: boolean) => {
+        set({ _hydrated: state });
       },
     }),
     {
       name: 'auth-storage',
+      storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         user: state.user,
         token: state.token,
         isAuthenticated: state.isAuthenticated,
       }),
+      onRehydrateStorage: () => (state) => {
+        state?.setHydrated(true);
+      },
     }
   )
 );

@@ -1,10 +1,21 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { useAuthStore } from './stores/auth-store';
 import { LoginForm } from './components/auth/LoginForm';
 import { SetupForm } from './components/auth/SetupForm';
 import { ProtectedRoute, PublicRoute } from './components/auth/AuthGuard';
 import { MainLayout } from './components/layout/MainLayout';
 
 function App() {
+  const hydrated = useAuthStore((state) => state._hydrated);
+
+  if (!hydrated) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-900">
+        <div className="text-white">Loading...</div>
+      </div>
+    );
+  }
+
   return (
     <Router>
       <Routes>
