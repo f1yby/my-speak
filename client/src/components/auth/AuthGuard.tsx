@@ -7,11 +7,20 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { isAuthenticated, checkSetup, isSetup } = useAuthStore();
+  const { isAuthenticated, checkSetup, isSetup, isHydrated, setHydrated } = useAuthStore();
   
   useEffect(() => {
+    setHydrated();
     checkSetup();
-  }, [checkSetup]);
+  }, [checkSetup, setHydrated]);
+  
+  if (!isHydrated) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-900">
+        <div className="text-white">Loading...</div>
+      </div>
+    );
+  }
   
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -29,7 +38,19 @@ interface PublicRouteProps {
 }
 
 export function PublicRoute({ children }: PublicRouteProps) {
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, isHydrated, setHydrated } = useAuthStore();
+
+  useEffect(() => {
+    setHydrated();
+  }, [setHydrated]);
+
+  if (!isHydrated) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-900">
+        <div className="text-white">Loading...</div>
+      </div>
+    );
+  }
   
   if (isAuthenticated) {
     return <Navigate to="/" replace />;
