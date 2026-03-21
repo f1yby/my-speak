@@ -15,7 +15,7 @@ export async function isServerSetup(): Promise<boolean> {
   const config = await prisma.serverConfig.findUnique({
     where: { id: 'default' },
   });
-  return !config;
+  return !!config;
 }
 
 export async function setupServer(password: string): Promise<void> {
