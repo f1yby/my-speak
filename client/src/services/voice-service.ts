@@ -140,13 +140,19 @@ export class VoiceService {
 
       this.socket.emit('voice:join', channelId);
 
+      console.log('[Voice] Initializing device...');
       await this.initDevice(channelId);
+      console.log('[Voice] Creating send transport...');
       await this.createSendTransport(channelId);
+      console.log('[Voice] Creating recv transport...');
       await this.createRecvTransport(channelId);
+      console.log('[Voice] Producing audio...');
       await this.produce();
+      console.log('[Voice] Ready!');
 
       return true;
     } catch (error) {
+      console.error('[Voice] Error:', error);
       const message = error instanceof Error ? error.message : 'Failed to get microphone access';
       this.onError?.(message);
       return false;
@@ -158,9 +164,12 @@ export class VoiceService {
 
     this.device = new Device();
 
+    console.log('[Voice] Getting router RTP capabilities...');
     const rtpCapabilities = await new Promise<any>((resolve) => {
       this.socket!.emit('voice:get-router-rtp-capabilities', channelId, resolve);
     });
+
+    console.log('[Voice] RTP capabilities:', rtpCapabilities);
 
     if (!rtpCapabilities) {
       await this.device.load({
@@ -183,9 +192,12 @@ export class VoiceService {
   private async createSendTransport(channelId: string): Promise<void> {
     if (!this.socket || !this.device) return;
 
+    console.log('[Voice] Creating transport...');
     const transportParams = await new Promise<any>((resolve) => {
       this.socket!.emit('voice:create-transport', channelId, resolve);
     });
+
+    console.log('[Voice] Transport params:', transportParams);
 
     if (transportParams.error) {
       throw new Error(transportParams.error);
