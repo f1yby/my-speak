@@ -4,7 +4,7 @@ import { useAuthStore } from '../../stores/auth-store';
 
 export function SetupForm() {
   const navigate = useNavigate();
-  const { setup, isLoading, error, clearError, checkSetup } = useAuthStore();
+  const { setup, isLoading, error, clearError } = useAuthStore();
   
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -27,7 +27,6 @@ export function SetupForm() {
     
     try {
       await setup({ password });
-      await checkSetup();
       navigate('/login');
     } catch (err) {
       // Error handled in store

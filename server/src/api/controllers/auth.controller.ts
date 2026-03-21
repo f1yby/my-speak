@@ -7,7 +7,7 @@ export async function checkSetup(req: Request, res: Response): Promise<void> {
     const isSetup = await authService.isServerSetup();
     res.json({
       success: true,
-      data: { isSetup: !isSetup },
+      data: { isSetup },
     });
   } catch (error) {
     console.error('Check setup error:', error);
