@@ -19,8 +19,6 @@ export class VoiceService {
   private producer: types.Producer | null = null;
   private consumers: Map<string, types.Consumer> = new Map();
   private audioElements: Map<string, HTMLAudioElement> = new Map();
-  private audioContext: AudioContext | null = null;
-  private participantGains: Map<string, GainNode> = new Map();
   private isMuted: boolean = false;
   private isDeafened: boolean = false;
   private noiseSuppressionEnabled: boolean = true;
@@ -151,8 +149,6 @@ export class VoiceService {
           track.enabled = false;
         });
       }
-
-      this.audioContext = new AudioContext({ sampleRate: 48000 });
 
       this.socket.emit('voice:join', channelId);
       
@@ -339,32 +335,11 @@ export class VoiceService {
     console.log('[Voice] Audio element created for', socketId);
   }
 
-  private setupAudioProcessing(socketId: string, stream: MediaStream): void {
-    if (!this.audioContext) return;
-
-    const source = this.audioContext.createMediaStreamSource(stream);
-    const gainNode = this.audioContext.createGain();
-    
-    const savedVolume = localStorage.getItem(`voice_volume_${socketId}`);
-    gainNode.gain.value = savedVolume ? parseFloat(savedVolume) : 1;
-    
-    this.participantGains.set(socketId, gainNode);
-    
-    source.connect(gainNode);
-    gainNode.connect(this.audioContext.destination);
-  }
-
   private closeConsumer(socketId: string): void {
     const consumer = this.consumers.get(socketId);
     if (consumer) {
       consumer.close();
       this.consumers.delete(socketId);
-    }
-
-    const gainNode = this.participantGains.get(socketId);
-    if (gainNode) {
-      gainNode.disconnect();
-      this.participantGains.delete(socketId);
     }
 
     const audio = this.audioElements.get(socketId);
@@ -375,12 +350,9 @@ export class VoiceService {
     }
   }
 
-  setParticipantVolume(socketId: string, volume: number): void {
-    const gainNode = this.participantGains.get(socketId);
-    if (gainNode) {
-      gainNode.gain.value = volume;
-      localStorage.setItem(`voice_volume_${socketId}`, volume.toString());
-    }
+  setParticipantVolume(_socketId: string, _volume: number): void {
+    // Volume control not implemented with simple Audio elements
+  }
   }
 
   getParticipantVolume(socketId: string): number {
@@ -410,10 +382,6 @@ export class VoiceService {
     
     this.audioElements.forEach((audio) => {
       audio.muted = this.isDeafened;
-    });
-
-    this.participantGains.forEach((gainNode) => {
-      gainNode.gain.value = this.isDeafened ? 0 : 1;
     });
     
     this.socket?.emit('voice:deafen', this.isDeafened);
@@ -470,13 +438,6 @@ export class VoiceService {
       audio.srcObject = null;
     });
     this.audioElements.clear();
-    
-    this.participantGains.clear();
-
-    if (this.audioContext) {
-      this.audioContext.close();
-      this.audioContext = null;
-    }
 
     if (this.socket) {
       this.socket.emit('voice:leave');
