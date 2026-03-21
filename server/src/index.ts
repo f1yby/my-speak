@@ -130,7 +130,8 @@ io.on('connection', async (socket) => {
       username,
     });
 
-    const rtpCapabilities = mediasoupService.getRouterRtpCapabilities(channelId);
+    const router = await mediasoupService.getOrCreateRouter(channelId);
+    const rtpCapabilities = router.rtpCapabilities;
     
     const existingUsers = Array.from(users.values())
       .filter(u => u.socketId !== socket.id && u.producerId)
