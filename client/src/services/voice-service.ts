@@ -24,7 +24,6 @@ export class VoiceService {
   private isMuted: boolean = false;
   private isDeafened: boolean = false;
   private noiseSuppressionEnabled: boolean = true;
-  private currentChannelId: string | null = null;
 
   private onParticipantJoined?: (participant: VoiceParticipant) => void;
   private onParticipantLeft?: (socketId: string) => void;
