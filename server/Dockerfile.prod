@@ -2,29 +2,22 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install SQLite and build dependencies
 RUN apk add --no-cache sqlite sqlite-dev openssl openssl-dev libc6-compat python3 py3-pip make g++ linux-headers
 
 COPY package*.json ./
 COPY prisma ./prisma/
 
-# Install all dependencies (including devDependencies for build)
 RUN npm ci
 
 COPY . .
 
 RUN npx prisma generate
 
-# Build TypeScript
 RUN npm run build
 
-# Prune devDependencies
 RUN npm prune --production
-
-# Create data directory for SQLite
-RUN mkdir -p /app/data
 
 EXPOSE 3001
 EXPOSE 10000-10100/udp
 
-CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/index.js"]
+CMD ["sh", "-c", "mkdir -p /app/data && npx prisma db push --skip-generate && node dist/index.js"]
