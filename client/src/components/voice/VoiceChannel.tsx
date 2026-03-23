@@ -24,6 +24,8 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
   const [noiseSuppressionEnabled, setNoiseSuppressionEnabled] = useState(true);
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
   const [participantVolumes, setParticipantVolumes] = useState<Map<string, number>>(new Map());
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speakingParticipants, setSpeakingParticipants] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
   const handleJoin = useCallback(async () => {
@@ -59,6 +61,20 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
         setParticipants((prev) =>
           prev.map((p) => (p.socketId === socketId ? { ...p, isDeafened: deafened } : p))
         );
+      },
+      onParticipantSpeaking: (socketId, speaking) => {
+        setSpeakingParticipants((prev) => {
+          const next = new Set(prev);
+          if (speaking) {
+            next.add(socketId);
+          } else {
+            next.delete(socketId);
+          }
+          return next;
+        });
+      },
+      onSpeakingChange: (speaking) => {
+        setIsSpeaking(speaking);
       },
       onError: (err) => {
         setError(err);
@@ -158,10 +174,14 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
 
       <div className="space-y-1 mb-3 max-h-32 overflow-y-auto">
         <div className="flex items-center space-x-2 text-sm">
-          <div className="w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center text-xs">
+          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs transition-all duration-200 ${
+            isSpeaking && !isMuted
+              ? 'bg-green-500 ring-2 ring-green-400 ring-opacity-75 animate-pulse'
+              : 'bg-indigo-600'
+          }`}>
             Y
           </div>
-          <span className="text-gray-300">You</span>
+          <span className={`transition-colors duration-200 ${isSpeaking && !isMuted ? 'text-green-300' : 'text-gray-300'}`}>You</span>
           {isMuted && <MicOff className="w-3 h-3 text-red-400" />}
           {isDeafened && <VolumeX className="w-3 h-3 text-red-400" />}
           {noiseSuppressionEnabled && <Waves className="w-3 h-3 text-blue-400" />}
@@ -170,13 +190,18 @@ export const VoiceChannel: React.FC<VoiceChannelProps> = ({
         {participants.map((participant) => {
           const volume = participantVolumes.get(participant.socketId) ?? 1;
           const volumePercent = Math.round(volume * 100);
+          const isParticipantSpeaking = speakingParticipants.has(participant.socketId);
           return (
             <div key={participant.socketId} className="space-y-1">
               <div className="flex items-center space-x-2 text-sm">
-                <div className="w-6 h-6 bg-gray-600 rounded-full flex items-center justify-center text-xs flex-shrink-0">
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0 transition-all duration-200 ${
+                  isParticipantSpeaking && !participant.isMuted
+                    ? 'bg-green-500 ring-2 ring-green-400 ring-opacity-75 animate-pulse'
+                    : 'bg-gray-600'
+                }`}>
                   {participant.username[0].toUpperCase()}
                 </div>
-                <span className="text-gray-300 truncate">{participant.username}</span>
+                <span className={`truncate transition-colors duration-200 ${isParticipantSpeaking && !participant.isMuted ? 'text-green-300' : 'text-gray-300'}`}>{participant.username}</span>
                 {participant.isMuted && <MicOff className="w-3 h-3 text-red-400 flex-shrink-0" />}
                 {participant.isDeafened && <VolumeX className="w-3 h-3 text-red-400 flex-shrink-0" />}
               </div>

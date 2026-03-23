@@ -161,6 +161,15 @@ export function registerVoiceHandlers(
     }
   });
 
+  socket.on('voice:speaking', (isSpeaking: boolean) => {
+    if (currentVoiceChannelId) {
+      socket.to(`voice:${currentVoiceChannelId}`).emit('voice:user-speaking', {
+        socketId: socket.id,
+        isSpeaking,
+      });
+    }
+  });
+
   return {
     cleanup: async () => {
       if (currentVoiceChannelId) {

@@ -1,6 +1,7 @@
 import { Socket } from 'socket.io-client';
 import { Device, types } from 'mediasoup-client';
 import { noiseSuppressionService } from './noise-suppression';
+import { createVAD, VADService } from './vad-service';
 
 export interface VoiceParticipant {
   socketId: string;
@@ -23,10 +24,15 @@ export class VoiceService {
   private isDeafened: boolean = false;
   private noiseSuppressionEnabled: boolean = true;
 
+  private vad: VADService | null = null;
+  private isSpeaking: boolean = false;
+
   private onParticipantJoined?: (participant: VoiceParticipant) => void;
   private onParticipantLeft?: (socketId: string) => void;
   private onParticipantMuted?: (socketId: string, isMuted: boolean) => void;
   private onParticipantDeafened?: (socketId: string, isDeafened: boolean) => void;
+  private onParticipantSpeaking?: (socketId: string, isSpeaking: boolean) => void;
+  private onSpeakingChange?: (isSpeaking: boolean) => void;
   private onError?: (error: string) => void;
 
   setSocket(socket: Socket): void {
@@ -38,12 +44,16 @@ export class VoiceService {
     onParticipantLeft?: (socketId: string) => void;
     onParticipantMuted?: (socketId: string, isMuted: boolean) => void;
     onParticipantDeafened?: (socketId: string, isDeafened: boolean) => void;
+    onParticipantSpeaking?: (socketId: string, isSpeaking: boolean) => void;
+    onSpeakingChange?: (isSpeaking: boolean) => void;
     onError?: (error: string) => void;
   }): void {
     this.onParticipantJoined = callbacks.onParticipantJoined;
     this.onParticipantLeft = callbacks.onParticipantLeft;
     this.onParticipantMuted = callbacks.onParticipantMuted;
     this.onParticipantDeafened = callbacks.onParticipantDeafened;
+    this.onParticipantSpeaking = callbacks.onParticipantSpeaking;
+    this.onSpeakingChange = callbacks.onSpeakingChange;
     this.onError = callbacks.onError;
   }
 
@@ -88,6 +98,10 @@ export class VoiceService {
 
     this.socket.on('voice:user-deafened', ({ socketId, isDeafened }: { socketId: string; isDeafened: boolean }) => {
       this.onParticipantDeafened?.(socketId, isDeafened);
+    });
+
+    this.socket.on('voice:user-speaking', ({ socketId, isSpeaking }: { socketId: string; isSpeaking: boolean }) => {
+      this.onParticipantSpeaking?.(socketId, isSpeaking);
     });
 
     this.socket.on('voice:new-producer', async (data: { producerId: string; socketId: string; username: string }) => {
@@ -149,6 +163,9 @@ export class VoiceService {
           track.enabled = false;
         });
       }
+
+      // Start VAD for speaking detection
+      this.startVAD(this.localStream);
 
       this.socket.emit('voice:join', channelId);
       
@@ -406,7 +423,35 @@ export class VoiceService {
     return this.noiseSuppressionEnabled;
   }
 
+  getIsSpeaking(): boolean {
+    return this.isSpeaking;
+  }
+
+  private startVAD(stream: MediaStream): void {
+    this.stopVAD();
+    this.vad = createVAD({
+      threshold: -45,
+      onSpeakingChange: (speaking: boolean) => {
+        if (this.isMuted) return;
+        this.isSpeaking = speaking;
+        this.onSpeakingChange?.(speaking);
+        this.socket?.emit('voice:speaking', speaking);
+      },
+    });
+    this.vad.start(stream);
+  }
+
+  private stopVAD(): void {
+    if (this.vad) {
+      this.vad.stop();
+      this.vad = null;
+    }
+    this.isSpeaking = false;
+  }
+
   leaveChannel(): void {
+    this.stopVAD();
+
     if (this.localStream) {
       this.localStream.getTracks().forEach((track) => track.stop());
       this.localStream = null;
