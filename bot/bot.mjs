@@ -15,7 +15,7 @@
  *   node bot.mjs --url https://speak.f1yby.space:8443 --password <server_password> --channel "my-channel"
  */
 
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -230,12 +230,11 @@ async function main() {
   }
 
   // Verify ffmpeg is available
-  try {
-    spawn('ffmpeg', ['-version'], { stdio: 'ignore' }).on('error', () => {
-      throw new Error('ffmpeg not found');
-    });
-  } catch {
+  const ffmpegCheck = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
+  if (ffmpegCheck.error) {
     console.error('Error: ffmpeg is required but not found. Please install it.');
+    console.error('  macOS:   brew install ffmpeg');
+    console.error('  Ubuntu:  sudo apt install ffmpeg');
     process.exit(1);
   }
 
@@ -322,7 +321,9 @@ async function main() {
   console.log('[Bot] Existing users:', joinedData.users?.length || 0);
 
   // Step 5: Initialize mediasoup Device
-  const device = new Device();
+  // Explicitly use Chrome111 handler since Node.js with @roamhq/wrtc
+  // is not auto-detected by mediasoup-client's detectDevice().
+  const device = new Device({ handlerName: 'Chrome111' });
   await device.load({ routerRtpCapabilities: joinedData.rtpCapabilities });
   console.log('[Bot] mediasoup Device loaded');
 

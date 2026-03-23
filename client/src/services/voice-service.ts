@@ -320,6 +320,14 @@ export class VoiceService {
 
     console.log('[Voice] Local consumer created, track:', consumer.track?.id, consumer.track?.readyState, consumer.track?.enabled, consumer.track?.muted);
 
+    // Resume the consumer - mediasoup-client creates consumers in paused state
+    await consumer.resume();
+    console.log('[Voice] Consumer resumed locally');
+
+    // Notify server to resume the consumer on its side
+    this.socket!.emit('voice:resume-consumer', { consumerId: result.id });
+    console.log('[Voice] Sent resume-consumer to server');
+
     this.consumers.set(socketId, consumer);
 
     const stream = new MediaStream([consumer.track]);

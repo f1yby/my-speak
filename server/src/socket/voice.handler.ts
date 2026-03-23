@@ -143,6 +143,15 @@ export function registerVoiceHandlers(
     }
   });
 
+  socket.on('voice:resume-consumer', async (data: { consumerId: string }) => {
+    try {
+      await mediasoupService.resumeConsumer(data.consumerId);
+      console.log(`Consumer resumed: ${data.consumerId}`);
+    } catch (error) {
+      console.error('Failed to resume consumer:', error);
+    }
+  });
+
   socket.on('voice:mute', (isMuted: boolean) => {
     if (currentVoiceChannelId) {
       socket.to(`voice:${currentVoiceChannelId}`).emit('voice:user-muted', {

@@ -174,7 +174,7 @@ export class MediasoupService {
     const consumer = await transport.consume({
       producerId,
       rtpCapabilities,
-      paused: false,
+      paused: true,
     });
 
     const consumerKey = `${transportId}:${producerId}`;
@@ -196,6 +196,17 @@ export class MediasoupService {
       kind: consumer.kind,
       rtpParameters: consumer.rtpParameters,
     };
+  }
+
+  async resumeConsumer(consumerId: string): Promise<void> {
+    for (const [, consumer] of this.consumers) {
+      if (consumer.id === consumerId) {
+        await consumer.resume();
+        console.log(`Consumer resumed on server: ${consumerId}`);
+        return;
+      }
+    }
+    console.warn(`Consumer not found for resume: ${consumerId}`);
   }
 
   getProducer(producerId: string): types.Producer | undefined {
