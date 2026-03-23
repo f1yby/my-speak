@@ -195,7 +195,7 @@ export class MediasoupService {
     const consumer = await transport.consume({
       producerId,
       rtpCapabilities,
-      paused: true,
+      paused: false,
     });
 
     // Store by consumer.id for reliable resume lookup
