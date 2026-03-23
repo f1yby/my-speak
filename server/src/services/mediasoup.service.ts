@@ -15,6 +15,7 @@ const mediaCodecs: types.RtpCodecCapability[] = [
 
 export class MediasoupService {
   private worker: types.Worker | null = null;
+  private webRtcServer: types.WebRtcServer | null = null;
   private routers = new Map<string, types.Router>();
   private transports = new Map<string, types.WebRtcTransport>();
   private producers = new Map<string, types.Producer>();
@@ -33,6 +34,35 @@ export class MediasoupService {
     });
 
     console.log('Mediasoup worker created');
+  }
+
+  async initWebRtcServer(): Promise<void> {
+    if (this.webRtcServer) return;
+    if (!this.worker) {
+      await this.initWorker();
+    }
+
+    const port = parseInt(process.env.MEDIASOUP_PORT || '10000', 10);
+    const announcedAddress = process.env.MEDIASOUP_ANNOUNCED_ADDRESS || undefined;
+
+    this.webRtcServer = await this.worker!.createWebRtcServer({
+      listenInfos: [
+        {
+          protocol: 'udp',
+          ip: '0.0.0.0',
+          announcedAddress,
+          port,
+        },
+        {
+          protocol: 'tcp',
+          ip: '0.0.0.0',
+          announcedAddress,
+          port,
+        },
+      ],
+    });
+
+    console.log(`WebRtcServer created on port ${port}`);
   }
 
   async getOrCreateRouter(channelId: string): Promise<types.Router> {
@@ -63,21 +93,12 @@ export class MediasoupService {
   }> {
     const router = await this.getOrCreateRouter(channelId);
 
+    if (!this.webRtcServer) {
+      throw new Error('WebRtcServer not initialized. Call initWebRtcServer() first.');
+    }
+
     const transport = await router.createWebRtcTransport({
-      listenInfos: [
-        {
-          protocol: 'udp',
-          ip: '0.0.0.0',
-          announcedAddress: process.env.MEDIASOUP_ANNOUNCED_ADDRESS || undefined,
-          portRange: { min: 10000, max: 10100 },
-        },
-        {
-          protocol: 'tcp',
-          ip: '0.0.0.0',
-          announcedAddress: process.env.MEDIASOUP_ANNOUNCED_ADDRESS || undefined,
-          portRange: { min: 10000, max: 10100 },
-        },
-      ],
+      webRtcServer: this.webRtcServer,
       enableUdp: true,
       enableTcp: true,
       preferUdp: true,

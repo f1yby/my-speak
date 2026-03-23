@@ -11,8 +11,8 @@ services:
       - sqlite_data:/app/data
     ports:
       - "3001:3001"
-      - "10000-10100:10000-10100/udp"
-      - "10000-10100:10000-10100/tcp"
+      - "10000:10000/udp"
+      - "10000:10000/tcp"
     networks:
       - myspeak_network
 

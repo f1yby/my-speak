@@ -73,6 +73,18 @@ export function createMockRouter(overrides: Record<string, unknown> = {}) {
 }
 
 /**
+ * Creates a mock mediasoup WebRtcServer.
+ */
+export function createMockWebRtcServer(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'webrtcserver-id-1',
+    close: vi.fn(),
+    on: vi.fn(),
+    ...overrides,
+  };
+}
+
+/**
  * Creates a mock mediasoup Worker.
  */
 export function createMockWorker(overrides: Record<string, unknown> = {}) {
@@ -80,6 +92,7 @@ export function createMockWorker(overrides: Record<string, unknown> = {}) {
     pid: 12345,
     close: vi.fn(),
     createRouter: vi.fn().mockResolvedValue(createMockRouter()),
+    createWebRtcServer: vi.fn().mockResolvedValue(createMockWebRtcServer()),
     on: vi.fn(),
     ...overrides,
   };

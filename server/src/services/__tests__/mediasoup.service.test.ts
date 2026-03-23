@@ -6,6 +6,7 @@ import {
   createMockTransport,
   createMockProducer,
   createMockConsumer,
+  createMockWebRtcServer,
 } from '../../__mocks__/mediasoup';
 
 describe('MediasoupService', () => {
@@ -13,14 +14,17 @@ describe('MediasoupService', () => {
   let mockWorker: ReturnType<typeof createMockWorker>;
   let mockRouter: ReturnType<typeof createMockRouter>;
   let mockTransport: ReturnType<typeof createMockTransport>;
+  let mockWebRtcServer: ReturnType<typeof createMockWebRtcServer>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockWorker = createMockWorker();
     mockRouter = createMockRouter();
     mockTransport = createMockTransport();
+    mockWebRtcServer = createMockWebRtcServer();
 
     mockWorker.createRouter.mockResolvedValue(mockRouter as any);
+    mockWorker.createWebRtcServer.mockResolvedValue(mockWebRtcServer as any);
     mockRouter.createWebRtcTransport.mockResolvedValue(mockTransport as any);
 
     service = new MediasoupService(async () => mockWorker as any);
@@ -68,18 +72,39 @@ describe('MediasoupService', () => {
     });
   });
 
+  describe('initWebRtcServer', () => {
+    it('should create a WebRtcServer', async () => {
+      await service.initWebRtcServer();
+      expect(mockWorker.createWebRtcServer).toHaveBeenCalled();
+    });
+
+    it('should not create WebRtcServer twice', async () => {
+      await service.initWebRtcServer();
+      await service.initWebRtcServer();
+      expect(mockWorker.createWebRtcServer).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('createWebRtcTransport', () => {
     it('should create transport and return parameters', async () => {
+      await service.initWebRtcServer();
       const result = await service.createWebRtcTransport('channel-1');
       expect(result).toHaveProperty('id');
       expect(result).toHaveProperty('iceParameters');
       expect(result).toHaveProperty('iceCandidates');
       expect(result).toHaveProperty('dtlsParameters');
     });
+
+    it('should throw if WebRtcServer not initialized', async () => {
+      await expect(
+        service.createWebRtcTransport('channel-1')
+      ).rejects.toThrow('WebRtcServer not initialized');
+    });
   });
 
   describe('connectTransport', () => {
     it('should connect an existing transport', async () => {
+      await service.initWebRtcServer();
       await service.createWebRtcTransport('channel-1');
       await service.connectTransport('transport-id-1', { fingerprints: [], role: 'auto' } as any);
       expect(mockTransport.connect).toHaveBeenCalled();
@@ -94,6 +119,7 @@ describe('MediasoupService', () => {
 
   describe('produce', () => {
     it('should create a producer on existing transport', async () => {
+      await service.initWebRtcServer();
       await service.createWebRtcTransport('channel-1');
 
       const result = await service.produce('channel-1', 'transport-id-1', 'audio', {} as any);
@@ -117,6 +143,7 @@ describe('MediasoupService', () => {
 
   describe('closeProducer', () => {
     it('should close and remove producer', async () => {
+      await service.initWebRtcServer();
       await service.createWebRtcTransport('channel-1');
       const { producerId } = await service.produce('channel-1', 'transport-id-1', 'audio', {} as any);
 
@@ -132,6 +159,7 @@ describe('MediasoupService', () => {
 
   describe('closeTransport', () => {
     it('should close and remove transport', async () => {
+      await service.initWebRtcServer();
       await service.createWebRtcTransport('channel-1');
       service.closeTransport('transport-id-1');
       expect(mockTransport.close).toHaveBeenCalled();

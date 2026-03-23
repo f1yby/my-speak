@@ -28,8 +28,6 @@ const messageService = new MessageService(prisma as any);
 const mediasoupService = new MediasoupService(async () => {
   return mediasoup.createWorker({
     logLevel: 'warn',
-    rtcMinPort: 10000,
-    rtcMaxPort: 10100,
   });
 });
 const voiceChannelManager = new VoiceChannelManager();
@@ -97,6 +95,9 @@ async function startServer() {
 
     await mediasoupService.initWorker();
     console.log('🎬 Mediasoup worker initialized');
+
+    await mediasoupService.initWebRtcServer();
+    console.log('🌐 Mediasoup WebRtcServer initialized (single port mode)');
 
     httpServer.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
