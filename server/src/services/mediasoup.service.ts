@@ -155,6 +155,19 @@ export class MediasoupService {
       this.producers.delete(producerKey);
     });
 
+    // Monitor producer score to verify RTP data is arriving
+    producer.on('score', (score) => {
+      console.log(`Producer ${producer.id} score:`, JSON.stringify(score));
+    });
+
+    producer.observer.on('pause', () => {
+      console.log(`Producer ${producer.id} paused`);
+    });
+
+    producer.observer.on('resume', () => {
+      console.log(`Producer ${producer.id} resumed`);
+    });
+
     console.log(`Producer created: ${producer.id} in channel ${channelId}`);
     return { producerId: producer.id };
   }

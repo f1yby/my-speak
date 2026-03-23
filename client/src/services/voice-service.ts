@@ -320,15 +320,25 @@ export class VoiceService {
 
     console.log('[Voice] Local consumer created, track:', consumer.track?.id, consumer.track?.readyState, consumer.track?.enabled, consumer.track?.muted);
 
+    // Monitor track mute state changes (muted=true means no RTP data flowing)
+    consumer.track.onmute = () => {
+      console.warn('[Voice] Track MUTED (no RTP data) for', socketId);
+    };
+    consumer.track.onunmute = () => {
+      console.log('[Voice] Track UNMUTED (RTP data flowing) for', socketId);
+    };
+
     this.consumers.set(socketId, consumer);
 
     const stream = new MediaStream([consumer.track]);
     console.log('[Voice] Stream tracks:', stream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, muted: t.muted, readyState: t.readyState })));
     
-    const audio = new Audio();
+    const audio = document.createElement('audio');
     audio.srcObject = stream;
     audio.autoplay = true;
     audio.volume = 1.0;
+    audio.setAttribute('data-socket-id', socketId);
+    document.body.appendChild(audio);
     
     audio.onloadedmetadata = () => {
       console.log('[Voice] Audio metadata loaded for', socketId);
@@ -364,6 +374,7 @@ export class VoiceService {
     if (audio) {
       audio.pause();
       audio.srcObject = null;
+      audio.remove();
       this.audioElements.delete(socketId);
     }
   }
@@ -481,6 +492,7 @@ export class VoiceService {
     this.audioElements.forEach((audio) => {
       audio.pause();
       audio.srcObject = null;
+      audio.remove();
     });
     this.audioElements.clear();
 
