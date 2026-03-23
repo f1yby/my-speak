@@ -5,11 +5,14 @@ services:
       dockerfile: Dockerfile.prod
     restart: unless-stopped
     env_file: .env
+    environment:
+      - MEDIASOUP_ANNOUNCED_ADDRESS=${MEDIASOUP_ANNOUNCED_ADDRESS:-}
     volumes:
       - sqlite_data:/app/data
     ports:
       - "3001:3001"
       - "10000-10100:10000-10100/udp"
+      - "10000-10100:10000-10100/tcp"
     networks:
       - myspeak_network
 

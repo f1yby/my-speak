@@ -324,9 +324,20 @@ export class VoiceService {
     await consumer.resume();
     console.log('[Voice] Consumer resumed locally');
 
-    // Notify server to resume the consumer on its side
-    this.socket!.emit('voice:resume-consumer', { consumerId: result.id });
-    console.log('[Voice] Sent resume-consumer to server');
+    // Notify server to resume the consumer on its side and wait for confirmation
+    await new Promise<void>((resolve, reject) => {
+      this.socket!.emit('voice:resume-consumer', { consumerId: result.id }, (response: any) => {
+        if (response?.error) {
+          console.error('[Voice] Server resume failed:', response.error);
+          reject(new Error(response.error));
+        } else {
+          console.log('[Voice] Server confirmed consumer resumed');
+          resolve();
+        }
+      });
+      // Timeout fallback
+      setTimeout(() => resolve(), 3000);
+    });
 
     this.consumers.set(socketId, consumer);
 

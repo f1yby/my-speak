@@ -177,15 +177,15 @@ export class MediasoupService {
       paused: true,
     });
 
-    const consumerKey = `${transportId}:${producerId}`;
-    this.consumers.set(consumerKey, consumer);
+    // Store by consumer.id for reliable resume lookup
+    this.consumers.set(consumer.id, consumer);
 
     consumer.on('transportclose', () => {
-      this.consumers.delete(consumerKey);
+      this.consumers.delete(consumer.id);
     });
 
     consumer.on('producerclose', () => {
-      this.consumers.delete(consumerKey);
+      this.consumers.delete(consumer.id);
     });
 
     console.log(`Consumer created: ${consumer.id} for producer ${producerId}, paused: ${consumer.paused}`);
@@ -199,14 +199,13 @@ export class MediasoupService {
   }
 
   async resumeConsumer(consumerId: string): Promise<void> {
-    for (const [, consumer] of this.consumers) {
-      if (consumer.id === consumerId) {
-        await consumer.resume();
-        console.log(`Consumer resumed on server: ${consumerId}`);
-        return;
-      }
+    const consumer = this.consumers.get(consumerId);
+    if (consumer) {
+      await consumer.resume();
+      console.log(`Consumer resumed on server: ${consumerId}, paused: ${consumer.paused}`);
+    } else {
+      console.warn(`Consumer not found for resume: ${consumerId}, available keys: [${Array.from(this.consumers.keys()).join(', ')}]`);
     }
-    console.warn(`Consumer not found for resume: ${consumerId}`);
   }
 
   getProducer(producerId: string): types.Producer | undefined {
@@ -230,15 +229,10 @@ export class MediasoupService {
   closeTransport(transportId: string): void {
     const transport = this.transports.get(transportId);
     if (transport) {
+      // transport.close() will trigger 'transportclose' on all consumers,
+      // which automatically removes them from this.consumers map
       transport.close();
       this.transports.delete(transportId);
-    }
-
-    for (const [key, consumer] of this.consumers) {
-      if (key.startsWith(`${transportId}:`)) {
-        consumer.close();
-        this.consumers.delete(key);
-      }
     }
   }
 

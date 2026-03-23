@@ -143,12 +143,14 @@ export function registerVoiceHandlers(
     }
   });
 
-  socket.on('voice:resume-consumer', async (data: { consumerId: string }) => {
+  socket.on('voice:resume-consumer', async (data: { consumerId: string }, callback?: Function) => {
     try {
       await mediasoupService.resumeConsumer(data.consumerId);
       console.log(`Consumer resumed: ${data.consumerId}`);
+      callback?.({ success: true });
     } catch (error) {
       console.error('Failed to resume consumer:', error);
+      callback?.({ error: 'Failed to resume consumer' });
     }
   });
 

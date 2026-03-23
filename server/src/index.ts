@@ -102,6 +102,7 @@ async function startServer() {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📡 Socket.io ready for connections`);
       console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🌐 Mediasoup announced address: ${process.env.MEDIASOUP_ANNOUNCED_ADDRESS || '(NOT SET - WebRTC may not work!)'}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
