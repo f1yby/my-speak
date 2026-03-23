@@ -131,8 +131,8 @@ describe('useSocket', () => {
     });
 
     // Simulate connect event to trigger callback
-    const connectHandler = mockOn.mock.calls.find(
-      (call: [string, Function]) => call[0] === 'connect'
+    const connectHandler = (mockOn.mock.calls as [string, Function][]).find(
+      (call) => call[0] === 'connect'
     )?.[1];
     if (connectHandler) {
       connectHandler();
