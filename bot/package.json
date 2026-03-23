@@ -1,0 +1,17 @@
+{
+  "name": "my-speak-bot",
+  "version": "1.0.0",
+  "description": "Audio bot for My-Speak - creates a test channel and loops audio playback",
+  "type": "module",
+  "scripts": {
+    "start": "node bot.mjs",
+    "start:dev": "node bot.mjs --url https://localhost:8443"
+  },
+  "dependencies": {
+    "@roamhq/wrtc": "^0.10.0",
+    "axios": "^1.13.6",
+    "mediasoup-client": "^3.18.7",
+    "@roamhq/wrtc": "^0.8.0",
+    "socket.io-client": "^4.8.3"
+  }
+}
