@@ -35,6 +35,9 @@ jobs:
     - name: Type check
       run: npx tsc --noEmit
 
+    - name: Test
+      run: npm test
+
   lint-and-test-server:
     runs-on: ubuntu-latest
     defaults:
@@ -65,6 +68,9 @@ jobs:
     
     - name: Type check
       run: npx tsc --noEmit
+
+    - name: Test
+      run: npm test
 
   docker-build:
     runs-on: ubuntu-latest

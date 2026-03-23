@@ -17,13 +17,10 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@config/*": ["./src/config/*"],
       "@db/*": ["./src/db/*"],
-      "@redis/*": ["./src/redis/*"],
       "@api/*": ["./src/api/*"],
       "@services/*": ["./src/services/*"],
-      "@signaling/*": ["./src/signaling/*"],
-      "@media/*": ["./src/media/*"],
+      "@socket/*": ["./src/socket/*"],
       "@utils/*": ["./src/utils/*"],
       "@types/*": ["./src/types/*"]
     }

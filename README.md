@@ -8,7 +8,7 @@
 - 👤 自选用户名 - 无需注册，进入时选择用户名
 - 💬 文字频道实时消息 - Socket.io 实时通信
 - 📁 频道管理 - 创建、删除频道
-- 💾 历史消息保存 - PostgreSQL 持久化存储
+- 💾 历史消息保存 - SQLite 持久化存储
 - 🔄 浏览器记住用户名 - 下次登录自动填充
 
 ## 技术栈
@@ -23,8 +23,9 @@
 ### 后端
 - Node.js 20 + Express
 - Socket.io
-- PostgreSQL + Prisma ORM
+- SQLite + Prisma ORM
 - bcrypt（密码加密）
+- Mediasoup (SFU 语音通话)
 
 ## 快速开始
 
@@ -61,14 +62,19 @@ my-speak/
 │   └── src/
 │       ├── components/
 │       │   ├── auth/    # 登录、设置组件
-│       │   └── layout/  # 主布局、消息组件
+│       │   └── layout/  # 主布局、拆分组件
+│       ├── hooks/       # 自定义 Hooks (useSocket, useChannels, useMessages)
 │       ├── services/    # API 服务
-│       └── stores/      # Zustand 状态管理
+│       ├── stores/      # Zustand 状态管理
+│       └── test/        # 测试配置与工具
 ├── server/              # Node.js 后端
 │   └── src/
-│       ├── api/         # 路由、控制器
-│       ├── services/    # 业务逻辑
-│       └── db/          # Prisma 客户端
+│       ├── api/         # 路由、控制器、中间件
+│       ├── services/    # 业务逻辑（依赖注入模式）
+│       ├── socket/      # Socket.io 事件处理器
+│       ├── types/       # TypeScript 类型定义
+│       ├── db/          # Prisma 客户端
+│       └── app.ts       # Express 应用工厂函数
 ├── docs/                # 项目文档
 └── docker-compose.yml   # Docker 编排
 ```
@@ -196,6 +202,16 @@ docker-compose logs -f frontend
 # 数据库迁移
 docker-compose exec backend npx prisma migrate dev
 
+# 运行后端测试
+cd server && npm test
+
+# 运行前端测试
+cd client && npm test
+
+# Watch 模式运行测试
+cd server && npm run test:watch
+cd client && npm run test:watch
+
 # 重启服务
 docker-compose restart backend
 docker-compose restart frontend
@@ -221,7 +237,7 @@ docker-compose down
 | 自选用户名 | ✅ 已实现 | 浏览器记住用户名 |
 | 创建/删除频道 | ✅ 已实现 | 所有人都能管理 |
 | 实时消息 | ✅ 已实现 | Socket.io 实时通信 |
-| 历史消息保存 | ✅ 已实现 | PostgreSQL 持久化 |
+| 历史消息保存 | ✅ 已实现 | SQLite 持久化 |
 | 消息实时显示 | ✅ 已实现 | Socket.io 广播 |
 | | | |
 | 语音通话 | ✅ 已实现 | Mediasoup SFU 中心化转发 |
