@@ -11,6 +11,10 @@ describe('CreateChannelModal', () => {
     onCreate: vi.fn(),
   };
 
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('should not render when isOpen is false', () => {
     render(<CreateChannelModal {...defaultProps} isOpen={false} />);
 

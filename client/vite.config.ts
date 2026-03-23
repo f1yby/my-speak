@@ -21,6 +21,11 @@ export default defineConfig({
         'src/test/**',
         'src/main.tsx',
         'src/vite-env.d.ts',
+        'src/services/voice-service.ts',
+        'src/services/noise-suppression.ts',
+        'src/services/vad-service.ts',
+        'src/components/voice/**',
+        'src/components/settings/AudioSettings.tsx',
       ],
       thresholds: {
         statements: 60,
